@@ -225,10 +225,18 @@ class SimpleCancellationProcessor:
                         for key, values in fields.items():
                             all_fields[key].extend(values)
                         
+                        # Read file data for download
+                        try:
+                            with open(file_path, 'rb') as f:
+                                file_data = f.read()
+                        except:
+                            file_data = b""
+                        
                         files_processed.append({
                             'filename': filename,
                             'fields': fields,
-                            'text_length': len(text)
+                            'text_length': len(text),
+                            'file_data': file_data
                         })
             
             return all_fields, files_processed
@@ -394,9 +402,10 @@ def main():
             col = cols[idx % 4]
             with col:
                 filename = file_data['filename']
+                file_bytes = file_data.get('file_data', b"")
                 st.download_button(
                     label=f"📄 {filename}",
-                    data=open(os.path.join(temp_dir, filename), 'rb').read() if os.path.exists(os.path.join(temp_dir, filename)) else b"",
+                    data=file_bytes,
                     file_name=filename,
                     mime="application/octet-stream",
                     key=f"download_{idx}"
