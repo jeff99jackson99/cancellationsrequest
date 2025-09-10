@@ -197,6 +197,8 @@ class PreciseTextProcessor:
                 'sale_date': [], 'contract_date': [], 'reason': [], 'mileage': [],
                 'total_refund': [], 'dealer_ncb': [], 'no_chargeback': []
             }
+        
+        print(f"✅ OpenAI available with API key for {filename}")
             
         try:
             # Use PyMuPDF to convert PDF to images for AI vision analysis
@@ -301,9 +303,18 @@ class PreciseTextProcessor:
             result = response.choices[0].message.content.strip()
             print(f"🤖 AI Vision Analysis for {filename}: {result}")
             
-            # Parse JSON response
+            # Parse JSON response - handle markdown code blocks
             import json
-            ai_data = json.loads(result)
+            import re
+            
+            # Remove markdown code blocks if present
+            json_match = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', result, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(1)
+            else:
+                json_str = result
+            
+            ai_data = json.loads(json_str)
             
             # Convert to our format
             data = {
@@ -587,13 +598,36 @@ class PreciseTextProcessor:
                         file_path = os.path.join(temp_dir, filename)
                         
                         # Use AI to do ALL heavy lifting - analyze PDF directly
+                        print(f"📄 Processing file: {filename}")
                         data = self.extract_data_with_ai(file_path, filename)
                         
                         # Debug output
                         print(f"=== {filename} ===")
+                        total_found = 0
                         for key, values in data.items():
                             if values:
                                 print(f"{key}: {values}")
+                                total_found += len(values)
+                            else:
+                                print(f"{key}: []")
+                        
+                        print(f"📊 Total fields found for {filename}: {total_found}")
+                        
+                        if total_found == 0:
+                            print(f"⚠️ No data extracted from {filename} - trying text extraction as fallback")
+                            # Try text extraction as fallback for debugging
+                            try:
+                                text = self.convert_file_to_text(file_path)
+                                if text and len(text.strip()) > 0:
+                                    print(f"📝 Text extracted ({len(text)} chars), trying text-based extraction")
+                                    text_data = self.extract_data_from_text(text, filename)
+                                    print(f"📊 Text extraction found: {sum(len(v) for v in text_data.values())} fields")
+                                    # Use text data if AI failed
+                                    data = text_data
+                                else:
+                                    print(f"❌ No text could be extracted from {filename}")
+                            except Exception as e:
+                                print(f"❌ Text extraction fallback failed: {e}")
                         
                         # Add to combined results
                         for key, values in data.items():
