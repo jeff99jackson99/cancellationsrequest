@@ -1,0 +1,15 @@
+
+PCMI NCB Fee Buckets
+Contract: GAP12345678
+VIN: 1HGBH41JXMN109186
+
+Fee Type          Amount    Status
+Agent NCB         $0.00     No Chargeback
+Dealer NCB        $0.00     No Chargeback
+Total Fees        $0.00     Complete
+Processing Fee    $25.00    Applied
+Refund Amount     $1,250.00 Pending
+
+Mileage: 45,000
+Cancellation Date: 12/15/2023
+Reason: Vehicle Traded

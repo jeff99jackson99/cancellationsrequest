@@ -61,27 +61,38 @@ class ScreenshotProcessor:
         }
     
     def preprocess_image(self, image):
-        """Preprocess image for better OCR"""
+        """Preprocess image for better OCR, especially for handwritten text"""
         if not OPENCV_AVAILABLE:
             # Fallback: return original image if OpenCV is not available
             return image
             
-        # Convert PIL to OpenCV format
-        img_array = np.array(image)
-        
-        # Convert to grayscale
-        gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
-        
-        # Apply denoising
-        denoised = cv2.fastNlMeansDenoising(gray)
-        
-        # Apply adaptive thresholding
-        thresh = cv2.adaptiveThreshold(
-            denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
-        )
-        
-        # Convert back to PIL
-        return Image.fromarray(thresh)
+        try:
+            # Convert PIL to OpenCV format
+            img_array = np.array(image)
+            
+            # Convert to grayscale
+            gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
+            
+            # Apply denoising (more aggressive for handwritten text)
+            denoised = cv2.fastNlMeansDenoising(gray, h=10)
+            
+            # Apply bilateral filter to reduce noise while preserving edges
+            filtered = cv2.bilateralFilter(denoised, 9, 75, 75)
+            
+            # Apply adaptive thresholding
+            thresh = cv2.adaptiveThreshold(
+                filtered, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
+            )
+            
+            # Morphological operations to clean up handwritten text
+            kernel = np.ones((2,2), np.uint8)
+            cleaned = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+            
+            # Convert back to PIL
+            return Image.fromarray(cleaned)
+        except Exception as e:
+            print(f"Image preprocessing failed: {e}")
+            return image
     
     def extract_ncb_data(self, image_path):
         """Extract NCB fee data from bucket screenshot"""
@@ -90,11 +101,11 @@ class ScreenshotProcessor:
             image = Image.open(image_path)
             processed_image = self.preprocess_image(image)
             
-            # Extract text using OCR
-            text = pytesseract.image_to_string(processed_image, config='--psm 6')
+            # Extract text using OCR with settings optimized for handwritten text
+            text = pytesseract.image_to_string(processed_image, config='--psm 6 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,;:()[]{}"/- ')
             
-            # Also try with different OCR settings
-            text_alt = pytesseract.image_to_string(image, config='--psm 3')
+            # Also try with different OCR settings for handwritten text
+            text_alt = pytesseract.image_to_string(image, config='--psm 3 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,;:()[]{}"/- ')
             
             # Combine both results
             combined_text = text + "\n" + text_alt
@@ -189,7 +200,7 @@ class CancellationProcessor:
                 else:
                     try:
                         image = Image.open(file_path)
-                        text = pytesseract.image_to_string(image)
+                        text = pytesseract.image_to_string(image, config='--psm 6 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,;:()[]{}"/- ')
                     except Exception as e:
                         st.warning(f"OCR failed for {file_path}: {e}")
             elif file_ext == '.txt':
@@ -205,7 +216,7 @@ class CancellationProcessor:
         try:
             image = Image.open(file_path)
             # Quick OCR to check for bucket-related keywords
-            text = pytesseract.image_to_string(image, config='--psm 6')
+            text = pytesseract.image_to_string(image, config='--psm 6 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,;:()[]{}"/- ')
             bucket_keywords = ['ncb', 'bucket', 'fee', 'agent', 'dealer', 'chargeback', 'pcmi']
             return any(keyword in text.lower() for keyword in bucket_keywords)
         except:
@@ -448,6 +459,57 @@ class CancellationProcessor:
         }
         return reason_map.get(reason.lower(), reason.title())
     
+    def filter_handwritten_reasons(self, reasons):
+        """Filter and prioritize reasons from handwritten documents"""
+        if not reasons:
+            return reasons
+            
+        # Common cancellation reasons in order of priority
+        priority_reasons = [
+            'customer request',
+            'cancellation request',
+            'customer cancellation',
+            'voluntary cancellation',
+            'total loss',
+            'repossession',
+            'loan payoff',
+            'vehicle traded',
+            'early payoff',
+            'refinance'
+        ]
+        
+        # Clean and normalize all reasons
+        cleaned_reasons = []
+        for reason in reasons:
+            if reason and reason.strip():
+                cleaned = reason.strip().lower()
+                # Remove common OCR noise
+                if len(cleaned) > 2 and not cleaned in ['→', 'upload', 'lienholder', 'payoff', 'letter']:
+                    cleaned_reasons.append(cleaned)
+        
+        if not cleaned_reasons:
+            return reasons
+            
+        # Find the best match based on priority
+        best_reason = None
+        for priority_reason in priority_reasons:
+            for cleaned_reason in cleaned_reasons:
+                if priority_reason in cleaned_reason or cleaned_reason in priority_reason:
+                    best_reason = cleaned_reason
+                    break
+            if best_reason:
+                break
+        
+        # If no priority match found, use the longest/shortest meaningful reason
+        if not best_reason:
+            # Filter out very short or very long reasons (likely OCR noise)
+            meaningful_reasons = [r for r in cleaned_reasons if 3 <= len(r) <= 50]
+            if meaningful_reasons:
+                # Prefer shorter, more specific reasons
+                best_reason = min(meaningful_reasons, key=len)
+        
+        return [best_reason] if best_reason else reasons
+    
     def parse_date(self, date_str):
         """Parse date string in various formats"""
         formats = ['%m/%d/%Y', '%m-%d-%Y', '%m/%d/%y', '%m-%d-%y']
@@ -646,8 +708,9 @@ class CancellationProcessor:
         result['Contract (canonical)'] = contract_value
         result['Contract Number'] = contract_value  # Set the contract number for display
         
-        # Reason evaluation
-        reason_status, reason_value = self.reconcile_values(all_reasons)
+        # Reason evaluation with handwritten document filtering
+        filtered_reasons = self.filter_handwritten_reasons(all_reasons)
+        reason_status, reason_value = self.reconcile_values(filtered_reasons)
         result['Reason Match across all forms'] = reason_status
         if reason_value:
             result['Reason (canonical)'] = '; '.join([self.normalize_reason(r) for r in reason_value.split('; ')])
