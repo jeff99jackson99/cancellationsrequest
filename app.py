@@ -18,8 +18,14 @@ except ImportError:
 class PreciseTextProcessor:
     def __init__(self):
         self.files_data = []
-        # Set up OpenAI API
-        openai.api_key = os.getenv("OPENAI_API_KEY")
+        # Set up OpenAI API - try Streamlit secrets first, then environment variable
+        if OPENAI_AVAILABLE:
+            try:
+                # Try Streamlit secrets first
+                openai.api_key = st.secrets["OPENAI_API_KEY"]
+            except:
+                # Fallback to environment variable
+                openai.api_key = os.getenv("OPENAI_API_KEY")
         
     def extract_best_pdf_text(self, file_path):
         """Try multiple PDF extraction methods and return the best result"""

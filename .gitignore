@@ -1,38 +1,20 @@
-# Python
+# Streamlit secrets (contains API keys)
+.streamlit/secrets.toml
+
+# Environment variables
+.env
+
+# Python cache
 __pycache__/
-*.py[cod]
-*$py.class
-*.so
+*.pyc
+*.pyo
+*.pyd
 .Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
-MANIFEST
 
-# Virtual Environment
-.venv/
+# Virtual environment
 venv/
-ENV/
 env/
-
-# Streamlit
-.streamlit/
-
-# Test files
-test_cancellation_packet.zip
-*.zip
+ENV/
 
 # IDE
 .vscode/
@@ -47,5 +29,6 @@ Thumbs.db
 # Logs
 *.log
 
-# OpenCV cache
-.cv2/
+# Temporary files
+*.tmp
+*.temp
