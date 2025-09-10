@@ -194,133 +194,134 @@ class PreciseTextProcessor:
                 'total_refund': [], 'dealer_ncb': [], 'no_chargeback': []
             }
             
-            # Use PyMuPDF to convert PDF to images for AI vision analysis
-            import fitz  # PyMuPDF
-            import base64
-            import io
-            from PIL import Image
-            
-            # Open PDF with PyMuPDF
-            doc = fitz.open(file_path)
-            images = []
-            
-            # Convert each page to image
-            for page_num in range(len(doc)):
-                page = doc.load_page(page_num)
-                # Render page to image (pixmap)
-                pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))  # 2x zoom for better quality
-                img_data = pix.tobytes("png")
-                images.append(img_data)
-            
-            doc.close()
-            
-            # Prepare images for AI analysis
-            image_data = []
-            for i, img_data in enumerate(images):
-                # Convert to base64
-                img_base64 = base64.b64encode(img_data).decode()
-                image_data.append({
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:image/png;base64,{img_base64}",
-                        "detail": "high"
+            try:
+                # Use PyMuPDF to convert PDF to images for AI vision analysis
+                import fitz  # PyMuPDF
+                import base64
+                import io
+                from PIL import Image
+                
+                # Open PDF with PyMuPDF
+                doc = fitz.open(file_path)
+                images = []
+                
+                # Convert each page to image
+                for page_num in range(len(doc)):
+                    page = doc.load_page(page_num)
+                    # Render page to image (pixmap)
+                    pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))  # 2x zoom for better quality
+                    img_data = pix.tobytes("png")
+                    images.append(img_data)
+                
+                doc.close()
+                
+                # Prepare images for AI analysis
+                image_data = []
+                for i, img_data in enumerate(images):
+                    # Convert to base64
+                    img_base64 = base64.b64encode(img_data).decode()
+                    image_data.append({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/png;base64,{img_base64}",
+                            "detail": "high"
+                        }
+                    })
+                
+                # AI Vision Analysis - Let AI do EVERYTHING
+                vision_prompt = f"""
+                You are an expert Quality Control analyst for cancellation documents. Analyze this PDF document and extract ALL required data with 100% accuracy.
+
+                DOCUMENT: {filename}
+                
+                EXTRACT THESE FIELDS EXACTLY:
+                1. VIN: 17-character Vehicle Identification Number (look for "VIN:", "Vehicle ID:", or similar labels)
+                2. Contract Number: Contract/Policy number starting with PN/PT/GAP/DL (look for "Contract:", "Policy:", "Account:")
+                3. Customer Name: Full name in "First Last" format (look for "Customer:", "Name:", "Borrower:")
+                4. Cancellation Date: Date in MM/DD/YYYY format (look for "Cancellation Date:", "Cancel Date:", "Effective Date:")
+                5. Sale Date: Contract sale date in MM/DD/YYYY format (look for "Sale Date:", "Contract Date:", "Purchase Date:")
+                6. Mileage: 4-6 digit number (look for "Mileage:", "Miles:", "Odometer:")
+                7. Total Refund: Dollar amount with $ symbol (look for "Refund:", "Total:", "Amount:")
+                8. Dealer NCB: Yes/No (look for "NCB:", "No Chargeback:", "Dealer NCB:")
+                9. No Chargeback: Yes/No (look for "No Chargeback:", "Chargeback:")
+                10. Reason: Cancellation reason (look for "Reason:", "Cancellation Reason:", "Why:")
+
+                CRITICAL RULES:
+                - Only extract data that is CLEARLY LABELED
+                - VIN must be exactly 17 alphanumeric characters
+                - Contract must start with PN/PT/GAP/DL
+                - Customer name must be exactly 2 words (First Last)
+                - Dates must be in MM/DD/YYYY format
+                - Mileage must be 4-6 digits only
+                - Money must include $ symbol
+                - NCB/Chargeback must be Yes or No only
+                - Reason must be specific (Customer Request, Loan Payoff, Vehicle Traded, etc.)
+
+                IMPORTANT: If you cannot find a field, return null. Do not guess or make up data.
+
+                Return as JSON with only the fields you find (null if not found):
+                {{
+                    "vin": "VIN_FOUND_OR_NULL",
+                    "contract_number": "CONTRACT_FOUND_OR_NULL",
+                    "customer_name": "NAME_FOUND_OR_NULL",
+                    "cancellation_date": "DATE_FOUND_OR_NULL",
+                    "sale_date": "DATE_FOUND_OR_NULL",
+                    "mileage": "MILEAGE_FOUND_OR_NULL",
+                    "total_refund": "REFUND_FOUND_OR_NULL",
+                    "dealer_ncb": "YES_NO_OR_NULL",
+                    "no_chargeback": "YES_NO_OR_NULL",
+                    "reason": "REASON_FOUND_OR_NULL"
+                }}
+                """
+                
+                # Prepare messages for vision model
+                messages = [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": vision_prompt},
+                            *image_data
+                        ]
                     }
-                })
-            
-            # AI Vision Analysis - Let AI do EVERYTHING
-            vision_prompt = f"""
-            You are an expert Quality Control analyst for cancellation documents. Analyze this PDF document and extract ALL required data with 100% accuracy.
-
-            DOCUMENT: {filename}
-            
-            EXTRACT THESE FIELDS EXACTLY:
-            1. VIN: 17-character Vehicle Identification Number (look for "VIN:", "Vehicle ID:", or similar labels)
-            2. Contract Number: Contract/Policy number starting with PN/PT/GAP/DL (look for "Contract:", "Policy:", "Account:")
-            3. Customer Name: Full name in "First Last" format (look for "Customer:", "Name:", "Borrower:")
-            4. Cancellation Date: Date in MM/DD/YYYY format (look for "Cancellation Date:", "Cancel Date:", "Effective Date:")
-            5. Sale Date: Contract sale date in MM/DD/YYYY format (look for "Sale Date:", "Contract Date:", "Purchase Date:")
-            6. Mileage: 4-6 digit number (look for "Mileage:", "Miles:", "Odometer:")
-            7. Total Refund: Dollar amount with $ symbol (look for "Refund:", "Total:", "Amount:")
-            8. Dealer NCB: Yes/No (look for "NCB:", "No Chargeback:", "Dealer NCB:")
-            9. No Chargeback: Yes/No (look for "No Chargeback:", "Chargeback:")
-            10. Reason: Cancellation reason (look for "Reason:", "Cancellation Reason:", "Why:")
-
-            CRITICAL RULES:
-            - Only extract data that is CLEARLY LABELED
-            - VIN must be exactly 17 alphanumeric characters
-            - Contract must start with PN/PT/GAP/DL
-            - Customer name must be exactly 2 words (First Last)
-            - Dates must be in MM/DD/YYYY format
-            - Mileage must be 4-6 digits only
-            - Money must include $ symbol
-            - NCB/Chargeback must be Yes or No only
-            - Reason must be specific (Customer Request, Loan Payoff, Vehicle Traded, etc.)
-
-            IMPORTANT: If you cannot find a field, return null. Do not guess or make up data.
-
-            Return as JSON with only the fields you find (null if not found):
-            {{
-                "vin": "VIN_FOUND_OR_NULL",
-                "contract_number": "CONTRACT_FOUND_OR_NULL",
-                "customer_name": "NAME_FOUND_OR_NULL",
-                "cancellation_date": "DATE_FOUND_OR_NULL",
-                "sale_date": "DATE_FOUND_OR_NULL",
-                "mileage": "MILEAGE_FOUND_OR_NULL",
-                "total_refund": "REFUND_FOUND_OR_NULL",
-                "dealer_ncb": "YES_NO_OR_NULL",
-                "no_chargeback": "YES_NO_OR_NULL",
-                "reason": "REASON_FOUND_OR_NULL"
-            }}
-            """
-            
-            # Prepare messages for vision model
-            messages = [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": vision_prompt},
-                        *image_data
-                    ]
+                ]
+                
+                client = openai.OpenAI(api_key=openai.api_key)
+                
+                response = client.chat.completions.create(
+                    model="gpt-4o",  # Use vision model
+                    messages=messages,
+                    max_tokens=1000,
+                    temperature=0
+                )
+                
+                result = response.choices[0].message.content.strip()
+                print(f"🤖 AI Vision Analysis for {filename}: {result}")
+                
+                # Parse JSON response
+                import json
+                ai_data = json.loads(result)
+                
+                # Convert to our format
+                data = {
+                    'vin': [ai_data.get('vin')] if ai_data.get('vin') and ai_data.get('vin') != 'null' else [],
+                    'contract_number': [ai_data.get('contract_number')] if ai_data.get('contract_number') and ai_data.get('contract_number') != 'null' else [],
+                    'customer_name': [ai_data.get('customer_name')] if ai_data.get('customer_name') and ai_data.get('customer_name') != 'null' else [],
+                    'cancellation_date': [ai_data.get('cancellation_date')] if ai_data.get('cancellation_date') and ai_data.get('cancellation_date') != 'null' else [],
+                    'sale_date': [ai_data.get('sale_date')] if ai_data.get('sale_date') and ai_data.get('sale_date') != 'null' else [],
+                    'contract_date': [ai_data.get('sale_date')] if ai_data.get('sale_date') and ai_data.get('sale_date') != 'null' else [],  # Use sale_date as contract_date
+                    'reason': [ai_data.get('reason')] if ai_data.get('reason') and ai_data.get('reason') != 'null' else [],
+                    'mileage': [ai_data.get('mileage')] if ai_data.get('mileage') and ai_data.get('mileage') != 'null' else [],
+                    'total_refund': [ai_data.get('total_refund')] if ai_data.get('total_refund') and ai_data.get('total_refund') != 'null' else [],
+                    'dealer_ncb': [ai_data.get('dealer_ncb')] if ai_data.get('dealer_ncb') and ai_data.get('dealer_ncb') != 'null' else [],
+                    'no_chargeback': [ai_data.get('no_chargeback')] if ai_data.get('no_chargeback') and ai_data.get('no_chargeback') != 'null' else []
                 }
-            ]
-            
-            client = openai.OpenAI(api_key=openai.api_key)
-            
-            response = client.chat.completions.create(
-                model="gpt-4o",  # Use vision model
-                messages=messages,
-                max_tokens=1000,
-                temperature=0
-            )
-            
-            result = response.choices[0].message.content.strip()
-            print(f"🤖 AI Vision Analysis for {filename}: {result}")
-            
-            # Parse JSON response
-            import json
-            ai_data = json.loads(result)
-            
-            # Convert to our format
-            data = {
-                'vin': [ai_data.get('vin')] if ai_data.get('vin') and ai_data.get('vin') != 'null' else [],
-                'contract_number': [ai_data.get('contract_number')] if ai_data.get('contract_number') and ai_data.get('contract_number') != 'null' else [],
-                'customer_name': [ai_data.get('customer_name')] if ai_data.get('customer_name') and ai_data.get('customer_name') != 'null' else [],
-                'cancellation_date': [ai_data.get('cancellation_date')] if ai_data.get('cancellation_date') and ai_data.get('cancellation_date') != 'null' else [],
-                'sale_date': [ai_data.get('sale_date')] if ai_data.get('sale_date') and ai_data.get('sale_date') != 'null' else [],
-                'contract_date': [ai_data.get('sale_date')] if ai_data.get('sale_date') and ai_data.get('sale_date') != 'null' else [],  # Use sale_date as contract_date
-                'reason': [ai_data.get('reason')] if ai_data.get('reason') and ai_data.get('reason') != 'null' else [],
-                'mileage': [ai_data.get('mileage')] if ai_data.get('mileage') and ai_data.get('mileage') != 'null' else [],
-                'total_refund': [ai_data.get('total_refund')] if ai_data.get('total_refund') and ai_data.get('total_refund') != 'null' else [],
-                'dealer_ncb': [ai_data.get('dealer_ncb')] if ai_data.get('dealer_ncb') and ai_data.get('dealer_ncb') != 'null' else [],
-                'no_chargeback': [ai_data.get('no_chargeback')] if ai_data.get('no_chargeback') and ai_data.get('no_chargeback') != 'null' else []
-            }
-            
-            # Remove empty values
-            for key in data:
-                data[key] = [v for v in data[key] if v and v != 'null' and v != '']
-            
-            print(f"✅ AI Vision extracted for {filename}: {data}")
-            return data
+                
+                # Remove empty values
+                for key in data:
+                    data[key] = [v for v in data[key] if v and v != 'null' and v != '']
+                
+                print(f"✅ AI Vision extracted for {filename}: {data}")
+                return data
             
         except Exception as e:
             print(f"❌ AI Vision extraction failed: {e}")
