@@ -251,21 +251,73 @@ class CancellationProcessor:
         contracts.extend(re.findall(generic_contract_pattern, text.upper()))
         fields['contracts'] = list(set(contracts))  # Remove duplicates
         
-        # Reason extraction
-        reason_pattern = r'(?:vehicle\s+traded|trade\s*in|sold|repossession|total\s*loss|dealer\s*buyback|customer\s*request)'
-        fields['reasons'] = re.findall(reason_pattern, text.lower())
+        # Reason extraction - more comprehensive patterns
+        reason_patterns = [
+            r'(?:vehicle\s+traded|trade\s*in|sold|repossession|total\s*loss|dealer\s*buyback|customer\s*request)',
+            r'(?:reason|cause)[:\s]+([^.\n]+)',
+            r'(?:cancellation|cancel)[:\s]+(?:reason|cause)[:\s]+([^.\n]+)',
+            r'(?:why|because)[:\s]+([^.\n]+)'
+        ]
         
-        # Date extraction
+        reasons = []
+        for pattern in reason_patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            for match in matches:
+                reason = match.strip()
+                if len(reason) > 3 and not any(char.isdigit() for char in reason[:10]):
+                    reasons.append(reason)
+        
+        fields['reasons'] = list(set(reasons))  # Remove duplicates
+        
+        # Date extraction - more comprehensive patterns
         date_pattern = r'([0-1]?\d[\/\-][0-3]?\d[\/\-](?:20)?\d{2})'
-        cancellation_date_pattern = r'(?:cancellation|cancel|effective)\s*date[ :\-]*' + date_pattern
-        sale_date_pattern = r'(?:contract\s*sale|sale)\s*date[ :\-]*' + date_pattern
         
-        fields['cancellation_dates'] = re.findall(cancellation_date_pattern, text, re.IGNORECASE)
-        fields['sale_dates'] = re.findall(sale_date_pattern, text, re.IGNORECASE)
+        # Cancellation date patterns
+        cancellation_patterns = [
+            r'(?:cancellation|cancel|effective)\s*date[ :\-]*' + date_pattern,
+            r'(?:date\s+of\s+cancellation|cancellation\s+date)[ :\-]*' + date_pattern,
+            r'(?:effective\s+date|date\s+effective)[ :\-]*' + date_pattern,
+            r'(?:canceled|cancelled)\s+on[ :\-]*' + date_pattern
+        ]
         
-        # Refund address extraction
-        address_pattern = r'(?:remit|send|mail)\s+(?:refund|check)\s+to[: ]\s*(.+?)(?:\n|$)'
-        fields['refund_addresses'] = re.findall(address_pattern, text, re.IGNORECASE)
+        cancellation_dates = []
+        for pattern in cancellation_patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            cancellation_dates.extend(matches)
+        fields['cancellation_dates'] = list(set(cancellation_dates))
+        
+        # Sale date patterns
+        sale_patterns = [
+            r'(?:contract\s*sale|sale)\s*date[ :\-]*' + date_pattern,
+            r'(?:date\s+of\s+sale|sale\s+date)[ :\-]*' + date_pattern,
+            r'(?:purchase\s+date|date\s+purchased)[ :\-]*' + date_pattern,
+            r'(?:sold\s+on|sale\s+on)[ :\-]*' + date_pattern
+        ]
+        
+        sale_dates = []
+        for pattern in sale_patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            sale_dates.extend(matches)
+        fields['sale_dates'] = list(set(sale_dates))
+        
+        # Refund address extraction - more comprehensive patterns
+        address_patterns = [
+            r'(?:remit|send|mail)\s+(?:refund|check)\s+to[: ]\s*(.+?)(?:\n|$)',
+            r'(?:refund|check)\s+(?:to|address)[: ]\s*(.+?)(?:\n|$)',
+            r'(?:send|mail)\s+(?:to|address)[: ]\s*(.+?)(?:\n|$)',
+            r'(?:return\s+to|refund\s+address)[: ]\s*(.+?)(?:\n|$)',
+            r'(?:different\s+address|alternate\s+address)[: ]\s*(.+?)(?:\n|$)'
+        ]
+        
+        addresses = []
+        for pattern in address_patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            for match in matches:
+                address = match.strip()
+                if len(address) > 5:  # Basic validation
+                    addresses.append(address)
+        
+        fields['refund_addresses'] = list(set(addresses))
         
         # Mileage extraction
         mileage_pattern = r'(?:mileage|odom(?:eter)?)\s*[:#]?\s*([0-9]{1,6}(?:,[0-9]{3})?)'
@@ -286,15 +338,85 @@ class CancellationProcessor:
                 if len(name) > 2 and not any(char.isdigit() for char in name):
                     fields['customer_names'].append(name)
         
-        # Flag detection with partial-word matching
-        fields['has_agent_ncb'] = bool(re.search(r'Agent\s+NCB|No\s*Chargeback', text, re.IGNORECASE))
-        fields['has_dealer_ncb'] = bool(re.search(r'Dealer\s+NCB|No\s*Chargeback', text, re.IGNORECASE))
-        fields['is_autohouse'] = bool(re.search(r'auto\s*house|autohouse', text, re.IGNORECASE))  # matches autohouse.com, AutoHouseLLC, Auto House, etc.
-        fields['is_customer_direct'] = bool(re.search(r'customer\s+direct|dealer\s+out\s+of\s+business|\bFF\b', text, re.IGNORECASE))
-        fields['is_diversicare'] = bool(re.search(r'diversicare', text, re.IGNORECASE))  # matches Diversicare, Diversicare-*, etc.
-        fields['has_signature'] = bool(re.search(r'signature', text, re.IGNORECASE))
-        fields['has_pcmi_hint'] = bool(re.search(r'pcmi|ncb\s*(fee|bucket)', text, re.IGNORECASE))
-        fields['is_lender_letter'] = bool(re.search(r'lender\s+letter|payoff\s+letter|addressed\s+to\s+ascent', text, re.IGNORECASE))
+        # Flag detection with comprehensive patterns
+        # Agent NCB patterns
+        agent_ncb_patterns = [
+            r'Agent\s+NCB',
+            r'No\s*Chargeback.*Agent',
+            r'Agent.*No\s*Chargeback',
+            r'Agent\s+Fee',
+            r'Agent.*NCB'
+        ]
+        fields['has_agent_ncb'] = any(re.search(pattern, text, re.IGNORECASE) for pattern in agent_ncb_patterns)
+        
+        # Dealer NCB patterns
+        dealer_ncb_patterns = [
+            r'Dealer\s+NCB',
+            r'No\s*Chargeback.*Dealer',
+            r'Dealer.*No\s*Chargeback',
+            r'Dealer\s+Fee',
+            r'Dealer.*NCB'
+        ]
+        fields['has_dealer_ncb'] = any(re.search(pattern, text, re.IGNORECASE) for pattern in dealer_ncb_patterns)
+        
+        # Autohouse patterns
+        autohouse_patterns = [
+            r'auto\s*house',
+            r'autohouse',
+            r'auto\s*house\s*llc',
+            r'auto\s*house\s*inc'
+        ]
+        fields['is_autohouse'] = any(re.search(pattern, text, re.IGNORECASE) for pattern in autohouse_patterns)
+        
+        # Customer direct patterns
+        customer_direct_patterns = [
+            r'customer\s+direct',
+            r'dealer\s+out\s+of\s+business',
+            r'\bFF\b',
+            r'dealer\s+closed',
+            r'business\s+closed'
+        ]
+        fields['is_customer_direct'] = any(re.search(pattern, text, re.IGNORECASE) for pattern in customer_direct_patterns)
+        
+        # Diversicare patterns
+        diversicare_patterns = [
+            r'diversicare',
+            r'diversi\s*care',
+            r'diversi-care'
+        ]
+        fields['is_diversicare'] = any(re.search(pattern, text, re.IGNORECASE) for pattern in diversicare_patterns)
+        
+        # Signature patterns
+        signature_patterns = [
+            r'signature',
+            r'signed',
+            r'sign\s*here',
+            r'authorized\s*signature',
+            r'customer\s*signature'
+        ]
+        fields['has_signature'] = any(re.search(pattern, text, re.IGNORECASE) for pattern in signature_patterns)
+        
+        # PCMI hint patterns
+        pcmi_patterns = [
+            r'pcmi',
+            r'ncb\s*(fee|bucket)',
+            r'fee\s*bucket',
+            r'chargeback\s*bucket',
+            r'ncbfee',
+            r'ncb\s*fee'
+        ]
+        fields['has_pcmi_hint'] = any(re.search(pattern, text, re.IGNORECASE) for pattern in pcmi_patterns)
+        
+        # Lender letter patterns
+        lender_letter_patterns = [
+            r'lender\s+letter',
+            r'payoff\s+letter',
+            r'addressed\s+to\s+ascent',
+            r'ascent\s+addressed',
+            r'payoff\s+notice',
+            r'lender\s+notice'
+        ]
+        fields['is_lender_letter'] = any(re.search(pattern, text, re.IGNORECASE) for pattern in lender_letter_patterns)
         
         # Enhanced NCB amount extraction for bucket screenshots
         if file_path and self.is_bucket_screenshot(file_path):
@@ -347,6 +469,34 @@ class CancellationProcessor:
             return 'PASS', clean_values[0]
         else:
             return 'FAIL', '; '.join(clean_values)
+    
+    def validate_checklist_completeness(self, result):
+        """Validate that all checklist items are properly evaluated"""
+        required_fields = [
+            'Vin Match on all forms',
+            'Contract Match on all forms and Google sheet',
+            'Reason Match across all forms',
+            'Cancellation date match across all forms. (Favor lender letter if applicable)',
+            'Is the cancellation effective date past 90 days from contract sale date?',
+            'Is there an Agent NCB Fee?',
+            'Is there a Dealer NCB Fee?',
+            'Is there a different address to send the refund? (only applicable if the request included a lender letter addressed to Ascent)',
+            'All necessary signatures collected?',
+            'Is this an Autohouse Contract?',
+            'Is this a customer direct cancellation? (Dealer Out of Business or FF contract)',
+            'Is this a Diversicare contract?',
+            'PCMI Screenshot (Of NCB fee buckets)'
+        ]
+        
+        missing_fields = []
+        for field in required_fields:
+            if field not in result:
+                missing_fields.append(field)
+        
+        if missing_fields:
+            st.warning(f"Missing checklist fields: {', '.join(missing_fields)}")
+        
+        return len(missing_fields) == 0
     
     def choose_cxl_date_with_lender_preference(self, files, all_cxl_dates):
         """
@@ -567,6 +717,9 @@ class CancellationProcessor:
         # Add source tracking data
         result['_source_data'] = source_data
         
+        # Validate checklist completeness
+        self.validate_checklist_completeness(result)
+        
         return result
     
     def process_zip(self, zip_file):
@@ -681,6 +834,30 @@ def main():
                     
                     # Display results
                     st.success(f"✅ Processed {len(results)} packet(s) from {len(processor.files_data)} file(s)")
+                    
+                    # Show extraction summary
+                    st.subheader("📊 Data Extraction Summary")
+                    total_vins = sum(len(f.get('vins', [])) for f in processor.files_data)
+                    total_contracts = sum(len(f.get('contracts', [])) for f in processor.files_data)
+                    total_reasons = sum(len(f.get('reasons', [])) for f in processor.files_data)
+                    total_dates = sum(len(f.get('cancellation_dates', [])) for f in processor.files_data)
+                    total_addresses = sum(len(f.get('refund_addresses', [])) for f in processor.files_data)
+                    total_mileages = sum(len(f.get('mileages', [])) for f in processor.files_data)
+                    total_customers = sum(len(f.get('customer_names', [])) for f in processor.files_data)
+                    
+                    col1, col2, col3, col4 = st.columns(4)
+                    with col1:
+                        st.metric("VINs Found", total_vins)
+                        st.metric("Contracts Found", total_contracts)
+                    with col2:
+                        st.metric("Reasons Found", total_reasons)
+                        st.metric("Dates Found", total_dates)
+                    with col3:
+                        st.metric("Addresses Found", total_addresses)
+                        st.metric("Mileages Found", total_mileages)
+                    with col4:
+                        st.metric("Customer Names", total_customers)
+                        st.metric("Files Processed", len(processor.files_data))
                     
                     # Summary statistics - more prominent
                     st.subheader("📊 QC Analysis Summary")
