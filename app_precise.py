@@ -7,25 +7,9 @@ import re
 from pathlib import Path
 from datetime import datetime, timedelta
 
-# Optional OpenAI import
-try:
-    import openai
-    OPENAI_AVAILABLE = True
-except ImportError:
-    OPENAI_AVAILABLE = False
-    print("OpenAI not available, using regex extraction only")
-
 class PreciseTextProcessor:
     def __init__(self):
         self.files_data = []
-        # Set up OpenAI API - try Streamlit secrets first, then environment variable
-        if OPENAI_AVAILABLE:
-            try:
-                # Try Streamlit secrets first
-                openai.api_key = st.secrets["OPENAI_API_KEY"]
-            except:
-                # Fallback to environment variable
-                openai.api_key = os.getenv("OPENAI_API_KEY")
         
     def extract_best_pdf_text(self, file_path):
         """Try multiple PDF extraction methods and return the best result"""
@@ -173,151 +157,6 @@ class PreciseTextProcessor:
         
         return text.strip()
     
-    def extract_data_with_ai(self, file_path, filename):
-        """Use AI to do ALL heavy lifting - analyze PDF directly for 100% accuracy"""
-        try:
-            if not OPENAI_AVAILABLE:
-                print("OpenAI not available, using regex extraction")
-                return self.extract_data_from_text("", filename)
-                
-            if not openai.api_key:
-                print("OpenAI API key not found, using regex extraction")
-                return self.extract_data_from_text("", filename)
-            
-            # Convert PDF to images for AI vision analysis
-            import pdf2image
-            from PIL import Image
-            import base64
-            import io
-            
-            # Convert PDF to images
-            images = pdf2image.convert_from_path(file_path, dpi=200)
-            
-            # Prepare images for AI analysis
-            image_data = []
-            for i, image in enumerate(images):
-                # Convert PIL image to base64
-                buffered = io.BytesIO()
-                image.save(buffered, format="PNG")
-                img_base64 = base64.b64encode(buffered.getvalue()).decode()
-                image_data.append({
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:image/png;base64,{img_base64}",
-                        "detail": "high"
-                    }
-                })
-            
-            # AI Vision Analysis - Let AI do EVERYTHING
-            vision_prompt = f"""
-            You are an expert Quality Control analyst for cancellation documents. Analyze this PDF document and extract ALL required data with 100% accuracy.
-
-            DOCUMENT: {filename}
-            
-            EXTRACT THESE FIELDS EXACTLY:
-            1. VIN: 17-character Vehicle Identification Number (look for "VIN:", "Vehicle ID:", or similar labels)
-            2. Contract Number: Contract/Policy number starting with PN/PT/GAP/DL (look for "Contract:", "Policy:", "Account:")
-            3. Customer Name: Full name in "First Last" format (look for "Customer:", "Name:", "Borrower:")
-            4. Cancellation Date: Date in MM/DD/YYYY format (look for "Cancellation Date:", "Cancel Date:", "Effective Date:")
-            5. Sale Date: Contract sale date in MM/DD/YYYY format (look for "Sale Date:", "Contract Date:", "Purchase Date:")
-            6. Mileage: 4-6 digit number (look for "Mileage:", "Miles:", "Odometer:")
-            7. Total Refund: Dollar amount with $ symbol (look for "Refund:", "Total:", "Amount:")
-            8. Dealer NCB: Yes/No (look for "NCB:", "No Chargeback:", "Dealer NCB:")
-            9. No Chargeback: Yes/No (look for "No Chargeback:", "Chargeback:")
-            10. Reason: Cancellation reason (look for "Reason:", "Cancellation Reason:", "Why:")
-
-            CRITICAL RULES:
-            - Only extract data that is CLEARLY LABELED
-            - VIN must be exactly 17 alphanumeric characters
-            - Contract must start with PN/PT/GAP/DL
-            - Customer name must be exactly 2 words (First Last)
-            - Dates must be in MM/DD/YYYY format
-            - Mileage must be 4-6 digits only
-            - Money must include $ symbol
-            - NCB/Chargeback must be Yes or No only
-            - Reason must be specific (Customer Request, Loan Payoff, Vehicle Traded, etc.)
-
-            Return as JSON with only the fields you find (null if not found):
-            {{
-                "vin": "VIN_FOUND_OR_NULL",
-                "contract_number": "CONTRACT_FOUND_OR_NULL",
-                "customer_name": "NAME_FOUND_OR_NULL",
-                "cancellation_date": "DATE_FOUND_OR_NULL",
-                "sale_date": "DATE_FOUND_OR_NULL",
-                "mileage": "MILEAGE_FOUND_OR_NULL",
-                "total_refund": "REFUND_FOUND_OR_NULL",
-                "dealer_ncb": "YES_NO_OR_NULL",
-                "no_chargeback": "YES_NO_OR_NULL",
-                "reason": "REASON_FOUND_OR_NULL"
-            }}
-            """
-            
-            # Prepare messages for vision model
-            messages = [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": vision_prompt},
-                        *image_data
-                    ]
-                }
-            ]
-            
-            client = openai.OpenAI(api_key=openai.api_key)
-            
-            response = client.chat.completions.create(
-                model="gpt-4o",  # Use vision model
-                messages=messages,
-                max_tokens=1000,
-                temperature=0
-            )
-            
-            result = response.choices[0].message.content.strip()
-            print(f"🤖 AI Vision Analysis for {filename}: {result}")
-            
-            # Parse JSON response
-            import json
-            ai_data = json.loads(result)
-            
-            # Convert to our format
-            data = {
-                'vin': [ai_data.get('vin')] if ai_data.get('vin') and ai_data.get('vin') != 'null' else [],
-                'contract_number': [ai_data.get('contract_number')] if ai_data.get('contract_number') and ai_data.get('contract_number') != 'null' else [],
-                'customer_name': [ai_data.get('customer_name')] if ai_data.get('customer_name') and ai_data.get('customer_name') != 'null' else [],
-                'cancellation_date': [ai_data.get('cancellation_date')] if ai_data.get('cancellation_date') and ai_data.get('cancellation_date') != 'null' else [],
-                'sale_date': [ai_data.get('sale_date')] if ai_data.get('sale_date') and ai_data.get('sale_date') != 'null' else [],
-                'contract_date': [ai_data.get('sale_date')] if ai_data.get('sale_date') and ai_data.get('sale_date') != 'null' else [],  # Use sale_date as contract_date
-                'reason': [ai_data.get('reason')] if ai_data.get('reason') and ai_data.get('reason') != 'null' else [],
-                'mileage': [ai_data.get('mileage')] if ai_data.get('mileage') and ai_data.get('mileage') != 'null' else [],
-                'total_refund': [ai_data.get('total_refund')] if ai_data.get('total_refund') and ai_data.get('total_refund') != 'null' else [],
-                'dealer_ncb': [ai_data.get('dealer_ncb')] if ai_data.get('dealer_ncb') and ai_data.get('dealer_ncb') != 'null' else [],
-                'no_chargeback': [ai_data.get('no_chargeback')] if ai_data.get('no_chargeback') and ai_data.get('no_chargeback') != 'null' else []
-            }
-            
-            # Remove empty values
-            for key in data:
-                data[key] = [v for v in data[key] if v and v != 'null' and v != '']
-            
-            print(f"✅ AI Vision extracted for {filename}: {data}")
-            return data
-            
-        except Exception as e:
-            print(f"AI Vision extraction failed: {e}")
-            # Fallback to simple text extraction
-            try:
-                import pdfplumber
-                with pdfplumber.open(file_path) as pdf:
-                    text = ""
-                    for page in pdf.pages:
-                        text += page.extract_text() or ""
-                return self.extract_data_from_text(text, filename)
-            except:
-                return {
-                    'vin': [], 'contract_number': [], 'customer_name': [], 'cancellation_date': [],
-                    'sale_date': [], 'contract_date': [], 'reason': [], 'mileage': [],
-                    'total_refund': [], 'dealer_ncb': [], 'no_chargeback': []
-                }
-
     def extract_data_from_text(self, text, filename):
         """Extract data using PRECISE patterns only"""
         data = {
@@ -342,7 +181,7 @@ class PreciseTextProcessor:
         vins = re.findall(vin_pattern, text, re.IGNORECASE)
         data['vin'] = list(set(vins))
         
-        # Contract number extraction - ONLY with specific labels
+        # Contract number extraction - ULTRA PRECISE patterns only
         contract_patterns = [
             r'Contract\s+Number[:\s]*([A-Z0-9]{6,20})',
             r'PN([A-Z0-9]{6,20})',  # PN followed directly by number
@@ -355,10 +194,8 @@ class PreciseTextProcessor:
         for pattern in contract_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
             for match in matches:
-                # Only accept if it's a proper contract number
-                if (len(match) >= 6 and len(match) <= 20 and 
-                    match.isalnum() and 
-                    match not in ['Customer', 'IONAgent', '510212066', 'RESERVELADDLRESERVE2', 'RNCBOFFSETADMINTOTAL']):
+                # Only accept if it's a proper contract number (not just "Customer")
+                if len(match) >= 6 and len(match) <= 20 and match.isalnum() and match != 'Customer':
                     contracts.append(match)
         data['contract_number'] = list(set(contracts))
         
@@ -380,13 +217,14 @@ class PreciseTextProcessor:
                         names.append(match)
         data['customer_name'] = list(set(names))
         
-        # Date extraction - ONLY with specific labels
+        # Date extraction - look for various date formats
         date_patterns = [
             r'cancellation\s+date[:\s]*(\d{1,2}/\d{1,2}/\d{4})',
             r'cancel\s+date[:\s]*(\d{1,2}/\d{1,2}/\d{4})',
             r'sale\s+date[:\s]*(\d{1,2}/\d{1,2}/\d{4})',
             r'contract\s+date[:\s]*(\d{1,2}/\d{1,2}/\d{4})',
             r'effective\s+date[:\s]*(\d{1,2}/\d{1,2}/\d{4})',
+            r'\b(\d{1,2}/\d{1,2}/\d{4})\b',  # Any MM/DD/YYYY format
             r'(August\s+\d{1,2},\s+\d{4})',  # August 22, 2025
             r'(September\s+\d{1,2},\s+\d{4})',  # September 9, 2025
         ]
@@ -415,7 +253,7 @@ class PreciseTextProcessor:
         data['sale_date'] = list(set(dates))
         data['contract_date'] = list(set(dates))
         
-        # Reason extraction - ONLY with specific labels, get ONE clear reason
+        # Reason extraction - ONLY with specific labels
         reason_patterns = [
             r'Reason[:\s]*([A-Za-z]+(?:\s+[A-Za-z]+){0,2})',
             r'(Customer\s+Request)',
@@ -431,20 +269,14 @@ class PreciseTextProcessor:
             for match in matches:
                 if len(match.split()) <= 3 and len(match) > 3:
                     reasons.append(match)
+        data['reason'] = list(set(reasons))
         
-        # Only keep the first clear reason found
-        if reasons:
-            data['reason'] = [reasons[0]]
-        else:
-            data['reason'] = []
-        
-        # Mileage extraction - ONLY with specific labels and realistic values
+        # Mileage extraction - look for 4-6 digit numbers that could be mileage
         mileage_patterns = [
             r'Mileage[:\s]*(\d{4,6})',
-            r'Mileage[:\s]*at[:\s]*cancellation[:\s]*date[,\s]*(\d{1,3},\d{3})',
-            r'Mileage[:\s]*at[:\s]*cancellation[:\s]*date[,\s]*(\d{4,6})',
             r'Odometer[:\s]*(\d{4,6})',
-            r'(\d{4,6})\s*miles?'
+            r'(\d{4,6})\s*miles?',
+            r'\b(\d{4,6})\b'  # Any 4-6 digit number
         ]
         
         mileages = []
@@ -455,16 +287,14 @@ class PreciseTextProcessor:
                 if len(clean_match) >= 4 and len(clean_match) <= 6:
                     try:
                         mileage_int = int(clean_match)
-                        # Only accept realistic mileage values (10,000 to 200,000 miles)
-                        # AND exclude common noise values
-                        if (10000 <= mileage_int <= 200000 and 
-                            mileage_int not in [103817, 4628, 3787, 2512, 20253, 202408, 103268, 101379, 4]):
+                        # Filter out years and other non-mileage numbers
+                        if 1000 <= mileage_int <= 999999 and mileage_int not in [2024, 2025, 202508]:
                             mileages.append(clean_match)
                     except:
                         continue
         data['mileage'] = list(set(mileages))
         
-        # Financial data extraction - ONLY with specific labels and reasonable amounts
+        # Financial data extraction - ONLY with specific labels
         money_patterns = [
             r'Refund[:\s]*\$?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)',
             r'Amount[:\s]*\$?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)',
@@ -479,55 +309,29 @@ class PreciseTextProcessor:
                 clean_match = match.replace(',', '')
                 try:
                     amount = float(clean_match)
-                    # Only accept reasonable refund amounts (between $100 and $50,000)
-                    if 100 <= amount <= 50000:
+                    if 0 <= amount <= 50000:
                         refunds.append(clean_match)
                 except:
                     continue
         data['total_refund'] = list(set(refunds))
         
-        # NCB extraction - look for NCB and chargeback information
+        # NCB extraction - ONLY with specific labels
         ncb_patterns = [
             r'NCB[:\s]*(Yes|No|Y|N)',
             r'Dealer[:\s]*NCB[:\s]*(Yes|No|Y|N)',
             r'No[:\s]*Chargeback[:\s]*(Yes|No|Y|N)',
-            r'Chargeback[:\s]*(Yes|No|Y|N)',
-            r'Dealer[:\s]*Remitted[:\s]*Amount[:\s]*(\$?[\d,]+\.?\d*)',
-            r'Cancel[:\s]*Fee[:\s]*(\$?[\d,]+\.?\d*)',
-            r'Dealer[:\s]*Profit[:\s]*Claim[:\s]*(\$?[\d,]+\.?\d*)',
-            r'Paid[:\s]*Ascent[:\s]*(\$?[\d,]+\.?\d*)',
-            r'Dealer[:\s]*Refund[:\s]*(\$?[\d,]+\.?\d*)',
-            r'Net[:\s]*Customer[:\s]*Refund[:\s]*(\$?[\d,]+\.?\d*)'
+            r'Chargeback[:\s]*(Yes|No|Y|N)'
         ]
         
         ncb_values = []
         chargeback_values = []
-        
         for pattern in ncb_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
             for match in matches:
-                if 'ncb' in pattern.lower() or 'remitted' in pattern.lower() or 'profit' in pattern.lower():
+                if 'ncb' in pattern.lower():
                     ncb_values.append(match)
-                if 'chargeback' in pattern.lower() or 'fee' in pattern.lower() or 'paid' in pattern.lower():
+                if 'chargeback' in pattern.lower():
                     chargeback_values.append(match)
-        
-        # Also look for percentage values that might indicate NCB
-        percentage_matches = re.findall(r'(\d+\.?\d*)\s*%', text)
-        for match in percentage_matches:
-            if float(match) == 100.0:  # 100% might indicate no NCB
-                ncb_values.append('No')
-            elif float(match) < 100.0:  # Less than 100% might indicate NCB
-                ncb_values.append('Yes')
-        
-        # Look for specific chargeback patterns in the Quote file
-        if 'Dealer Remitted Amount' in text and 'Cancel Fee' in text:
-            # If we see these patterns, it might indicate chargeback information
-            chargeback_values.append('Yes')
-        
-        # Look for $0.00 values that might indicate no chargeback
-        zero_amounts = re.findall(r'\$0\.00', text)
-        if zero_amounts and len(zero_amounts) >= 2:  # Multiple $0.00 might indicate no chargeback
-            chargeback_values.append('No')
         
         data['dealer_ncb'] = list(set(ncb_values))
         data['no_chargeback'] = list(set(chargeback_values))
@@ -560,31 +364,37 @@ class PreciseTextProcessor:
                     if not filename.endswith('/'):  # Skip directories
                         file_path = os.path.join(temp_dir, filename)
                         
-                        # Use AI to do ALL heavy lifting - analyze PDF directly
-                        data = self.extract_data_with_ai(file_path, filename)
+                        # Convert file to text
+                        text = self.convert_file_to_text(file_path)
                         
-                        # Debug output
-                        print(f"=== {filename} ===")
-                        for key, values in data.items():
-                            if values:
-                                print(f"{key}: {values}")
-                        
-                        # Add to combined results
-                        for key, values in data.items():
-                            all_data[key].extend(values)
-                        
-                        # Read file data for download
-                        try:
-                            with open(file_path, 'rb') as f:
-                                file_data = f.read()
-                        except:
-                            file_data = b""
-                        
-                        files_processed.append({
-                            'filename': filename,
-                            'data': data,
-                            'file_data': file_data
-                        })
+                        if text:
+                            # Extract data from text
+                            data = self.extract_data_from_text(text, filename)
+                            
+                            # Debug output
+                            print(f"=== {filename} ===")
+                            print(f"Text length: {len(text)} characters")
+                            for key, values in data.items():
+                                if values:
+                                    print(f"{key}: {values}")
+                            
+                            # Add to combined results
+                            for key, values in data.items():
+                                all_data[key].extend(values)
+                            
+                            # Read file data for download
+                            try:
+                                with open(file_path, 'rb') as f:
+                                    file_data = f.read()
+                            except:
+                                file_data = b""
+                            
+                            files_processed.append({
+                                'filename': filename,
+                                'data': data,
+                                'text_length': len(text),
+                                'file_data': file_data
+                            })
             
             return all_data, files_processed
     
@@ -609,35 +419,17 @@ class PreciseTextProcessor:
             if not file_values:
                 return False, "No data found"
             
-            # If only one file has this field, it's still valid (not all files need all data)
+            # If only one file has this field, it's inconsistent
             if len(file_values) == 1:
-                return True, "Found in one file"
+                return False, "Only found in one file"
             
-            # Check if there's any overlap between files
-            all_values = set()
-            for values in file_values:
-                all_values.update(values)
-            
-            # If all files have the same set of values, it's consistent
+            # All files should have the same set of values
             first_values = file_values[0]
-            all_match = True
             for values in file_values[1:]:
                 if values != first_values:
-                    all_match = False
-                    break
+                    return False, f"Different values across files"
             
-            if all_match:
-                return True, "All files match"
-            else:
-                # Check if there's at least one common value
-                common_values = first_values
-                for values in file_values[1:]:
-                    common_values = common_values.intersection(values)
-                
-                if common_values:
-                    return True, f"Common values found: {', '.join(common_values)}"
-                else:
-                    return False, "No common values across files"
+            return True, "All files match"
         
         # 1. Contract Number - must match across all files
         all_contracts = all_data['contract_number']
@@ -692,25 +484,21 @@ class PreciseTextProcessor:
             # Use sale date first, fallback to contract date
             reference_dates = sale_dates if sale_dates else contract_dates
             try:
-                # Parse cancellation date - use the most recent one
-                cancel_dates = []
+                # Parse cancellation date
+                cancel_date = None
                 for date_str in cancellation_dates:
-                    parsed_date = self.parse_date(date_str)
-                    if parsed_date:
-                        cancel_dates.append(parsed_date)
+                    cancel_date = self.parse_date(date_str)
+                    if cancel_date:
+                        break
                 
-                # Parse reference date - use the earliest one
-                ref_dates = []
+                # Parse reference date
+                ref_date = None
                 for date_str in reference_dates:
-                    parsed_date = self.parse_date(date_str)
-                    if parsed_date:
-                        ref_dates.append(parsed_date)
+                    ref_date = self.parse_date(date_str)
+                    if ref_date:
+                        break
                 
-                if cancel_dates and ref_dates:
-                    # Use the most recent cancellation date and earliest reference date
-                    cancel_date = max(cancel_dates)
-                    ref_date = min(ref_dates)
-                    
+                if cancel_date and ref_date:
                     days_diff = (cancel_date - ref_date).days
                     if days_diff >= 90:
                         results['ninety_days'] = {'status': 'PASS', 'value': f'{days_diff} days', 'reason': f'Cancellation is {days_diff} days after reference date'}
