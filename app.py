@@ -272,12 +272,12 @@ class PreciseTextProcessor:
                     reasons.append(match)
         data['reason'] = list(set(reasons))
         
-        # Mileage extraction - look for 4-6 digit numbers that could be mileage
+        # Mileage extraction - ONLY with specific labels and realistic values
         mileage_patterns = [
             r'Mileage[:\s]*(\d{4,6})',
+            r'Mileage[:\s]*at[:\s]*cancellation[:\s]*date[,\s]*(\d{4,6})',
             r'Odometer[:\s]*(\d{4,6})',
-            r'(\d{4,6})\s*miles?',
-            r'(?<![0-9])(\d{4,6})(?![0-9])'  # 4-6 digit number not surrounded by other digits
+            r'(\d{4,6})\s*miles?'
         ]
         
         mileages = []
@@ -288,9 +288,10 @@ class PreciseTextProcessor:
                 if len(clean_match) >= 4 and len(clean_match) <= 6:
                     try:
                         mileage_int = int(clean_match)
-                        # Filter out years, VIN parts, and other non-mileage numbers
-                        if (1000 <= mileage_int <= 999999 and 
-                            mileage_int not in [2024, 2025, 202508, 202507, 8765, 93117, 22773, 7003, 202508, 100, 306920, 20255]):
+                        # Only accept realistic mileage values (10,000 to 200,000 miles)
+                        # AND exclude common noise values
+                        if (10000 <= mileage_int <= 200000 and 
+                            mileage_int not in [103817, 4628, 3787, 2512, 20253, 202408, 103268, 101379, 4]):
                             mileages.append(clean_match)
                     except:
                         continue
