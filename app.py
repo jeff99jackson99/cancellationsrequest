@@ -318,23 +318,48 @@ class PreciseTextProcessor:
                     continue
         data['total_refund'] = list(set(refunds))
         
-        # NCB extraction - ONLY with specific labels
+        # NCB extraction - look for NCB and chargeback information
         ncb_patterns = [
             r'NCB[:\s]*(Yes|No|Y|N)',
             r'Dealer[:\s]*NCB[:\s]*(Yes|No|Y|N)',
             r'No[:\s]*Chargeback[:\s]*(Yes|No|Y|N)',
-            r'Chargeback[:\s]*(Yes|No|Y|N)'
+            r'Chargeback[:\s]*(Yes|No|Y|N)',
+            r'Dealer[:\s]*Remitted[:\s]*Amount[:\s]*(\$?[\d,]+\.?\d*)',
+            r'Cancel[:\s]*Fee[:\s]*(\$?[\d,]+\.?\d*)',
+            r'Dealer[:\s]*Profit[:\s]*Claim[:\s]*(\$?[\d,]+\.?\d*)',
+            r'Paid[:\s]*Ascent[:\s]*(\$?[\d,]+\.?\d*)',
+            r'Dealer[:\s]*Refund[:\s]*(\$?[\d,]+\.?\d*)',
+            r'Net[:\s]*Customer[:\s]*Refund[:\s]*(\$?[\d,]+\.?\d*)'
         ]
         
         ncb_values = []
         chargeback_values = []
+        
         for pattern in ncb_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
             for match in matches:
-                if 'ncb' in pattern.lower():
+                if 'ncb' in pattern.lower() or 'remitted' in pattern.lower() or 'profit' in pattern.lower():
                     ncb_values.append(match)
-                if 'chargeback' in pattern.lower():
+                if 'chargeback' in pattern.lower() or 'fee' in pattern.lower() or 'paid' in pattern.lower():
                     chargeback_values.append(match)
+        
+        # Also look for percentage values that might indicate NCB
+        percentage_matches = re.findall(r'(\d+\.?\d*)\s*%', text)
+        for match in percentage_matches:
+            if float(match) == 100.0:  # 100% might indicate no NCB
+                ncb_values.append('No')
+            elif float(match) < 100.0:  # Less than 100% might indicate NCB
+                ncb_values.append('Yes')
+        
+        # Look for specific chargeback patterns in the Quote file
+        if 'Dealer Remitted Amount' in text and 'Cancel Fee' in text:
+            # If we see these patterns, it might indicate chargeback information
+            chargeback_values.append('Yes')
+        
+        # Look for $0.00 values that might indicate no chargeback
+        zero_amounts = re.findall(r'\$0\.00', text)
+        if zero_amounts and len(zero_amounts) >= 2:  # Multiple $0.00 might indicate no chargeback
+            chargeback_values.append('No')
         
         data['dealer_ncb'] = list(set(ncb_values))
         data['no_chargeback'] = list(set(chargeback_values))
