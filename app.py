@@ -647,21 +647,14 @@ class CancellationProcessor:
         
         fields['contracts'] = list(set(filtered_contracts))  # Remove duplicates
         
-        # Reason extraction - more restrictive patterns
+        # Reason extraction - very conservative patterns
         reason_patterns = [
-            r'(?:vehicle\s+traded|trade\s*in|sold|repossession|total\s*loss|dealer\s*buyback|customer\s*request)',
-            r'(?:reason|cause)[:\s]+([A-Za-z\s]{3,30})',
-            r'(?:cancellation|cancel)[:\s]+(?:reason|cause)[:\s]+([A-Za-z\s]{3,30})',
-            r'(?:cancellation\s+request|cancel\s+request)[:\s]*([A-Za-z\s]{3,30})',
-            r'(?:customer\s+request|client\s+request)[:\s]*([A-Za-z\s]{3,30})',
-            r'(?:loan\s+payoff|payoff)[:\s]*([A-Za-z\s]{3,30})',
-            r'(?:repossession|repo)[:\s]*([A-Za-z\s]{3,30})',
-            r'(?:total\s+loss|accident)[:\s]*([A-Za-z\s]{3,30})',
-            r'(?:default|delinquent)[:\s]*([A-Za-z\s]{3,30})',
-            r'(?:issued\s+in\s+error|error)[:\s]*([A-Za-z\s]{3,30})',
-            r'(?:vehicle\s+sold|sold)[:\s]*([A-Za-z\s]{3,30})',
-            r'(?:vehicle\s+stolen|stolen)[:\s]*([A-Za-z\s]{3,30})',
-            r'(?:deal\s+unwound|unwound)[:\s]*([A-Za-z\s]{3,30})',
+            r'Reason[:\s]+([A-Za-z\s]{3,30})',
+            r'Cancellation\s+Reason[:\s]+([A-Za-z\s]{3,30})',
+            r'Customer\s+Request[:\s]*([A-Za-z\s]{3,30})',
+            r'Vehicle\s+Traded[:\s]*([A-Za-z\s]{3,30})',
+            r'Total\s+Loss[:\s]*([A-Za-z\s]{3,30})',
+            r'Repossession[:\s]*([A-Za-z\s]{3,30})',
         ]
         
         reasons = []
@@ -669,10 +662,10 @@ class CancellationProcessor:
             matches = re.findall(pattern, text, re.IGNORECASE)
             for match in matches:
                 reason = match.strip()
-                if (len(reason) >= 3 and len(reason) <= 50 and  # Reasonable length
+                if (len(reason) >= 3 and len(reason) <= 30 and  # Reasonable length
                     not any(char.isdigit() for char in reason) and  # No numbers
-                    reason.lower() not in ['reason', 'cause', 'why', 'because', 'cancellation', 'cancel', 'the', 'only', 'instance', 'which', 'customer', 'signature', 'required', 'when', 'being', 'requested', 'directly', 'all', 'other', 'scenarios', 'such', 'loan', 'payoff', 'repossession', 'total', 'loss', 'appropriate', 'supporting', 'documentation', 'from', 'lienholder', 'dealer', 'insurance', 'provider', 'must', 'provided', 'please', 'note', 'failure', 'upload', 'required', 'documentation', 'complete', 'form', 'full', 'will', 'result', 'delays', 'processing', 'may', 'potentially', 'invalidate', 'request', 'today', 'legal', 'attestation', 'statement', 'submitting', 'hereby', 'certify', 'information', 'true', 'correct', 'acknowledge', 'agree', 'electronic', 'shall', 'have', 'same', 'force', 'handwritten', 'ascent', 'administration', 'rely', 'upon', 'submission', 'official', 'understand', 'providing', 'false', 'incomplete', 'misleading', 'denial', 'delay', 'andor', 'liability'] and  # Common false positives
-                    len(reason.split()) <= 5):  # Not too many words
+                    reason.lower() not in ['reason', 'cause', 'cancellation', 'cancel', 'customer', 'request'] and
+                    len(reason.split()) <= 3):  # Not too many words
                     reasons.append(reason)
         
         fields['reasons'] = list(set(reasons))  # Remove duplicates
@@ -788,14 +781,12 @@ class CancellationProcessor:
         
         fields['mileages'] = list(set(filtered_mileages))
         
-        # Customer name extraction - more restrictive patterns
+        # Customer name extraction - very conservative patterns
         customer_patterns = [
-            r'(?:customer|client|name)[:\s]+([A-Z][a-z]+\s+[A-Z][a-z]+)',  # Customer: First Last
+            r'Customer\s+Name[:\s]+([A-Z][a-z]+\s+[A-Z][a-z]+)',  # Customer Name: First Last
             r'Name[:\s]+([A-Z][a-z]+\s+[A-Z][a-z]+)',  # Name: First Last
-            r'Customer[:\s]+([A-Z][a-z]+\s+[A-Z][a-z]+)',  # Customer: First Last
-            r'(?:first\s+name|last\s+name)[:\s]+([A-Z][a-z]+)',  # First Name: John
-            r'(?:buyer|purchaser)[:\s]+([A-Z][a-z]+\s+[A-Z][a-z]+)',  # Buyer: First Last
-            r'(?:signature|signed\s+by)[:\s]+([A-Z][a-z]+\s+[A-Z][a-z]+)',  # Signature: First Last
+            r'Buyer[:\s]+([A-Z][a-z]+\s+[A-Z][a-z]+)',  # Buyer: First Last
+            r'Purchaser[:\s]+([A-Z][a-z]+\s+[A-Z][a-z]+)',  # Purchaser: First Last
         ]
         
         for pattern in customer_patterns:
@@ -1094,6 +1085,9 @@ class CancellationProcessor:
         file_path = os.path.join(temp_dir, filename)
         file_ext = os.path.splitext(filename)[1].lower()
         
+        # Sanitize filename for thumbnail paths (remove spaces and special chars)
+        safe_filename = re.sub(r'[^\w\-_\.]', '_', filename)
+        
         print(f"Creating thumbnail for {filename} at {file_path}")
         print(f"File exists: {os.path.exists(file_path)}")
         
@@ -1103,7 +1097,7 @@ class CancellationProcessor:
                 image = Image.open(file_path)
                 image.thumbnail(size, Image.Resampling.LANCZOS)
                 # Save thumbnail to file
-                thumbnail_path = os.path.join(temp_dir, f"thumb_{filename}.png")
+                thumbnail_path = os.path.join(temp_dir, f"thumb_{safe_filename}.png")
                 image.save(thumbnail_path, "PNG")
                 print(f"Created image thumbnail for {filename}")
                 return thumbnail_path
@@ -1119,9 +1113,17 @@ class CancellationProcessor:
                             # Create thumbnail
                             pdf_image.thumbnail(size, Image.Resampling.LANCZOS)
                             # Save thumbnail to file
-                            thumbnail_path = os.path.join(temp_dir, f"thumb_{filename}.png")
+                            thumbnail_path = os.path.join(temp_dir, f"thumb_{safe_filename}.png")
                             pdf_image.save(thumbnail_path, "PNG")
-                            print(f"Created PDF thumbnail for {filename}")
+                            
+                            # Also create high-res version for expansion (2x size, 2x resolution)
+                            high_res_size = (size[0] * 2, size[1] * 2)  # 800x600
+                            high_res_image = images[0].copy()  # Use original high-res image
+                            high_res_image.thumbnail(high_res_size, Image.Resampling.LANCZOS)
+                            high_res_path = os.path.join(temp_dir, f"highres_{safe_filename}.png")
+                            high_res_image.save(high_res_path, "PNG", quality=95)
+                            
+                            print(f"Created PDF thumbnail and high-res version for {filename}")
                             return thumbnail_path
                     except Exception as e:
                         print(f"PDF conversion failed for {filename}: {e}")
@@ -1137,7 +1139,7 @@ class CancellationProcessor:
                 draw.text((10, 10), "PDF", fill='red', font=font)
                 draw.text((10, 30), filename[:20], fill='black', font=font)
                 # Save thumbnail to file
-                thumbnail_path = os.path.join(temp_dir, f"thumb_{filename}.png")
+                thumbnail_path = os.path.join(temp_dir, f"thumb_{safe_filename}.png")
                 img.save(thumbnail_path, "PNG")
                 print(f"Created PDF fallback icon for {filename}")
                 return thumbnail_path
@@ -1153,7 +1155,7 @@ class CancellationProcessor:
                 draw.text((10, 10), "DOC", fill='blue', font=font)
                 draw.text((10, 30), filename[:20], fill='black', font=font)
                 # Save thumbnail to file
-                thumbnail_path = os.path.join(temp_dir, f"thumb_{filename}.png")
+                thumbnail_path = os.path.join(temp_dir, f"thumb_{safe_filename}.png")
                 img.save(thumbnail_path, "PNG")
                 print(f"Created DOC thumbnail for {filename}")
                 return thumbnail_path
@@ -1169,7 +1171,7 @@ class CancellationProcessor:
                 draw.text((10, 10), "TXT", fill='green', font=font)
                 draw.text((10, 30), filename[:20], fill='black', font=font)
                 # Save thumbnail to file
-                thumbnail_path = os.path.join(temp_dir, f"thumb_{filename}.png")
+                thumbnail_path = os.path.join(temp_dir, f"thumb_{safe_filename}.png")
                 img.save(thumbnail_path, "PNG")
                 print(f"Created TXT thumbnail for {filename}")
                 return thumbnail_path
@@ -1197,8 +1199,11 @@ class CancellationProcessor:
                 font = None
             draw.text((10, 10), "ERROR", fill='white', font=font)
             draw.text((10, 30), str(e)[:20], fill='white', font=font)
+            # Save error thumbnail to file
+            thumbnail_path = os.path.join(temp_dir, f"thumb_{safe_filename}.png")
+            img.save(thumbnail_path, "PNG")
             print(f"Error creating thumbnail for {filename}: {e}")
-            return img
+            return thumbnail_path
 
     def create_high_res_image(self, file_data, temp_dir):
         """Create a high-resolution version of the file for click-to-expand"""
@@ -1214,10 +1219,15 @@ class CancellationProcessor:
                 # For PDFs, convert to high-res image
                 if PDF2IMAGE_AVAILABLE:
                     try:
-                        # Convert PDF to high-res image with maximum quality
+                        # Convert PDF to high-res image with maximum quality (2x resolution)
                         images = convert_from_path(file_path, first_page=1, last_page=1, dpi=1200)
                         if images:
-                            return images[0]
+                            # Resize to 2x the thumbnail size for better display
+                            img = images[0]
+                            # Scale up to 2x size for better visibility
+                            new_size = (img.width * 2, img.height * 2)
+                            img = img.resize(new_size, Image.Resampling.LANCZOS)
+                            return img
                     except Exception as e:
                         print(f"High-res PDF conversion failed for {filename}: {e}")
             return None
@@ -1264,19 +1274,29 @@ class CancellationProcessor:
                             
                             # Check if this file should be expanded
                             if st.session_state.get(f'expand_{filename}', False):
-                                # Create high-res version for expansion
-                                high_res = self.create_high_res_image(file_data, temp_dir)
-                                if high_res:
-                                    st.subheader(f"🔍 {filename} - Full Resolution")
-                                    st.image(high_res, use_container_width=True)
+                                # Use pre-generated high-res image if available
+                                high_res_path = file_data.get('high_res_path')
+                                if high_res_path and os.path.exists(high_res_path):
+                                    st.subheader(f"🔍 {filename} - Full Resolution (2x Size)")
+                                    st.image(high_res_path, use_container_width=True)
                                     if st.button(f"❌ Close {filename}", key=f"close_{expand_key}"):
                                         st.session_state[f'expand_{filename}'] = False
                                         st.rerun()
                                 else:
-                                    st.warning(f"Could not create high-resolution version of {filename}")
-                                    if st.button(f"❌ Close {filename}", key=f"close_{expand_key}"):
-                                        st.session_state[f'expand_{filename}'] = False
-                                        st.rerun()
+                                    # Fallback: create high-res version on demand
+                                    with st.spinner(f"Generating high-resolution version of {filename}..."):
+                                        high_res = self.create_high_res_image(file_data, temp_dir)
+                                        if high_res:
+                                            st.subheader(f"🔍 {filename} - Full Resolution")
+                                            st.image(high_res, use_container_width=True)
+                                            if st.button(f"❌ Close {filename}", key=f"close_{expand_key}"):
+                                                st.session_state[f'expand_{filename}'] = False
+                                                st.rerun()
+                                        else:
+                                            st.warning(f"Could not create high-resolution version of {filename}")
+                                            if st.button(f"❌ Close {filename}", key=f"close_{expand_key}"):
+                                                st.session_state[f'expand_{filename}'] = False
+                                                st.rerun()
                         else:
                             st.write("📄 No thumbnail available")
                         
@@ -2009,6 +2029,13 @@ class CancellationProcessor:
                                 file_data = {'filename': file}
                                 thumbnail = self.create_thumbnail(file_data, temp_dir)
                                 fields['thumbnail'] = thumbnail
+                                
+                                # Check if high-res version was created
+                                safe_filename = re.sub(r'[^\w\-_\.]', '_', file)
+                                high_res_path = os.path.join(temp_dir, f"highres_{safe_filename}.png")
+                                if os.path.exists(high_res_path):
+                                    fields['high_res_path'] = high_res_path
+                                
                                 print(f"Successfully created thumbnail for {file}")
                             except Exception as e:
                                 print(f"Failed to create thumbnail for {file}: {e}")
@@ -2158,6 +2185,7 @@ def main():
                     total_addresses = sum(len(f.get('refund_addresses', [])) for f in processor.files_data)
                     total_mileages = sum(len(f.get('mileages', [])) for f in processor.files_data)
                     total_customers = sum(len(f.get('customer_names', [])) for f in processor.files_data)
+                    
                     
                     
                     col1, col2, col3, col4 = st.columns(4)
