@@ -358,6 +358,8 @@ class ScreenshotProcessor:
                 'total_amount': None,
                 'has_agent_ncb': False,
                 'has_dealer_ncb': False,
+                'sale_date': None,
+                'contract_number': None,
                 'raw_text': combined_text
             }
             
@@ -400,10 +402,44 @@ class ScreenshotProcessor:
                     except ValueError:
                         continue
             
+            # Extract sale date from PCMI screenshots
+            sale_date_patterns = [
+                r'sale\s*date[:\s]*(\d{1,2}/\d{1,2}/\d{4})',
+                r'effect\s*date[:\s]*(\d{1,2}/\d{1,2}/\d{4})',
+                r'(?:sale|effect)\s*date[:\s]*(\d{1,2}/\d{1,2}/\d{2,4})',
+                r'sale[:\s]*(\d{1,2}/\d{1,2}/\d{4})',
+                r'effect[:\s]*(\d{1,2}/\d{1,2}/\d{4})'
+            ]
+            
+            for pattern in sale_date_patterns:
+                match = re.search(pattern, combined_text, re.IGNORECASE)
+                if match:
+                    ncb_data['sale_date'] = match.group(1)
+                    break
+            
+            # Extract contract number from PCMI screenshots
+            contract_patterns = [
+                r'contract\s*number[:\s]*([A-Z0-9]+)',
+                r'contract[:\s]*([A-Z0-9]+)',
+                r'pn(\d+)',
+                r'edit\s*contract\s*([A-Z0-9]+)'
+            ]
+            
+            for pattern in contract_patterns:
+                match = re.search(pattern, combined_text, re.IGNORECASE)
+                if match:
+                    contract_num = match.group(1)
+                    if not contract_num.startswith('PN'):
+                        contract_num = 'PN' + contract_num
+                    ncb_data['contract_number'] = contract_num
+                    break
+            
             # Debug output for results
             print(f"  Agent NCB: {ncb_data['agent_ncb_amount']}")
             print(f"  Dealer NCB: {ncb_data['dealer_ncb_amount']}")
             print(f"  Total: {ncb_data['total_amount']}")
+            print(f"  Sale Date: {ncb_data['sale_date']}")
+            print(f"  Contract: {ncb_data['contract_number']}")
             print(f"  Has Agent NCB: {ncb_data['has_agent_ncb']}")
             print(f"  Has Dealer NCB: {ncb_data['has_dealer_ncb']}")
             
@@ -417,6 +453,8 @@ class ScreenshotProcessor:
                 'total_amount': None,
                 'has_agent_ncb': False,
                 'has_dealer_ncb': False,
+                'sale_date': None,
+                'contract_number': None,
                 'raw_text': ''
             }
 
@@ -619,18 +657,35 @@ class CancellationProcessor:
             cancellation_dates.extend(matches)
         fields['cancellation_dates'] = list(set(cancellation_dates))
         
-        # Sale date patterns
+        # Sale date patterns - enhanced for PCMI screenshots
         sale_patterns = [
             r'(?:contract\s*sale|sale)\s*date[ :\-]*' + date_pattern,
             r'(?:date\s+of\s+sale|sale\s+date)[ :\-]*' + date_pattern,
             r'(?:purchase\s+date|date\s+purchased)[ :\-]*' + date_pattern,
-            r'(?:sold\s+on|sale\s+on)[ :\-]*' + date_pattern
+            r'(?:sold\s+on|sale\s+on)[ :\-]*' + date_pattern,
+            r'sale\s*date[ :\-]*' + date_pattern,  # Simple "Sale Date: MM/DD/YYYY"
+            r'effect\s*date[ :\-]*' + date_pattern,  # "Effect Date: MM/DD/YYYY"
+            r'(?:contract|sale)\s*date[ :\-]*' + date_pattern,  # "Contract Date: MM/DD/YYYY"
+            r'purchase[ :\-]*' + date_pattern,  # "Purchase: MM/DD/YYYY"
+            r'sold[ :\-]*' + date_pattern,  # "Sold: MM/DD/YYYY"
+            r'(?:in\s*service|service)\s*date[ :\-]*' + date_pattern,  # "In-Service Date: MM/DD/YYYY"
+            r'billed\s*date[ :\-]*' + date_pattern,  # "Billed Date: MM/DD/YYYY"
+            # More flexible patterns for table data
+            r'(?:sale|effect|contract|purchase|billed)\s*date[:\s]*(\d{1,2}/\d{1,2}/\d{2,4})',
+            r'(?:sale|effect|contract|purchase|billed)[:\s]*(\d{1,2}/\d{1,2}/\d{2,4})',
+            # Pattern for PCMI table format
+            r'(?:sale\s*date|effect\s*date)[:\s]*(\d{1,2}/\d{1,2}/\d{4})',
         ]
         
         sale_dates = []
         for pattern in sale_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
             sale_dates.extend(matches)
+        
+        # Debug output for sale dates
+        if sale_dates:
+            print(f"Found sale dates in {file_path}: {sale_dates}")
+        
         fields['sale_dates'] = list(set(sale_dates))
         
         # Refund address extraction - more comprehensive patterns
@@ -789,6 +844,12 @@ class CancellationProcessor:
             fields['total_ncb_amount'] = ncb_data['total_amount']
             fields['has_agent_ncb'] = ncb_data['has_agent_ncb']
             fields['has_dealer_ncb'] = ncb_data['has_dealer_ncb']
+            
+            # Also extract sale date and contract number from NCB data
+            if ncb_data['sale_date']:
+                fields['sale_dates'].append(ncb_data['sale_date'])
+            if ncb_data['contract_number']:
+                fields['contracts'].append(ncb_data['contract_number'])
         
         return fields
     
