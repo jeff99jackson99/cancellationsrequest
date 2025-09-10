@@ -1396,27 +1396,27 @@ class CancellationProcessor:
             except ValueError:
                 pass
         
-        # Try to identify values by context
+        # Try to identify values by context - enhanced patterns for bucket/quote forms
         lines = text.split('\n')
         for line in lines:
             line_lower = line.lower()
             
-            # Look for specific labels
-            if 'retail' in line_lower and 'purchase' in line_lower and 'price' in line_lower:
+            # Look for specific labels with more flexible patterns
+            if any(term in line_lower for term in ['retail', 'purchase', 'price']) and any(term in line_lower for term in ['price', 'amount', 'total']):
                 for value in money_values:
                     if value > 1000:  # Reasonable retail price
                         calculations['retail_purchase_price'] = value
                         break
             
-            elif 'dealer' in line_lower and 'remitted' in line_lower:
+            elif any(term in line_lower for term in ['dealer', 'remitted', 'amount']) and 'refund' not in line_lower:
                 for value in money_values:
-                    if 500 < value < 5000:  # Reasonable dealer amount
+                    if 500 < value < 10000:  # Reasonable dealer amount
                         calculations['dealer_remitted_amount'] = value
                         break
             
-            elif 'cancel' in line_lower and 'fee' in line_lower:
+            elif any(term in line_lower for term in ['cancel', 'fee', 'charge']) and any(term in line_lower for term in ['fee', 'amount', 'charge']):
                 for value in money_values:
-                    if 0 < value < 1000:  # Reasonable cancel fee
+                    if 0 < value < 2000:  # Reasonable cancel fee
                         calculations['cancel_fee'] = value
                         break
             
@@ -1432,10 +1432,23 @@ class CancellationProcessor:
                         calculations['dealer_refund'] = value
                         break
             
-            elif 'net' in line_lower and 'customer' in line_lower and 'refund' in line_lower:
+            elif any(term in line_lower for term in ['net', 'customer', 'refund']) and 'ascent' not in line_lower:
                 for value in money_values:
                     if value > 0:
                         calculations['net_customer_refund'] = value
+                        break
+            
+            # Additional patterns for bucket/quote form tables
+            elif 'base refund' in line_lower:
+                for value in money_values:
+                    if value > 0:
+                        calculations['dealer_remitted_amount'] = value
+                        break
+            
+            elif 'dealer profit' in line_lower:
+                for value in money_values:
+                    if value > 0:
+                        calculations['cancel_fee'] = value
                         break
         
         # If we couldn't identify by context, try to assign by value ranges
@@ -1849,8 +1862,8 @@ class CancellationProcessor:
         # Check if any files contain bucket/refund information
         bucket_files = [f for f in files if f.get('has_pcmi_hint', False) or 'bucket' in f.get('filename', '').lower()]
         
+        # Try to extract calculations from bucket files first
         if bucket_files:
-            # Extract calculations from bucket files
             for file_data in bucket_files:
                 if file_data.get('raw_text'):
                     calculations = self.validate_refund_calculations(file_data['raw_text'])
@@ -1860,6 +1873,22 @@ class CancellationProcessor:
                         calculation_status = validation_result['status']
                         calculation_issues = validation_result['issues']
                         break
+        
+        # If no calculations found in bucket files, try all files
+        if not calculation_details:
+            for file_data in files:
+                if file_data.get('raw_text'):
+                    print(f"Debug - Checking calculations in {file_data.get('filename', 'unknown')}")
+                    calculations = self.validate_refund_calculations(file_data['raw_text'])
+                    if any(calculations.values()):
+                        print(f"Debug - Found calculations: {calculations}")
+                        calculation_details = calculations
+                        validation_result = self.check_calculation_accuracy(calculations)
+                        calculation_status = validation_result['status']
+                        calculation_issues = validation_result['issues']
+                        break
+                    else:
+                        print(f"Debug - No calculations found in {file_data.get('filename', 'unknown')}")
         
         result['Refund Calculation Status'] = calculation_status
         result['Refund Calculation Issues'] = '; '.join(calculation_issues) if calculation_issues else ''
@@ -2373,35 +2402,37 @@ def main():
                                 elif mileage_status == "PASS":
                                     st.markdown(f"   └─ All mileages match")
                             
-                            # Refund Calculations
+                            # Refund Calculations - Always show this section
                             calc_status = result.get('Refund Calculation Status', 'INFO')
-                            if calc_status != "INFO":
-                                calc_color = "🟢" if calc_status == "PASS" else "🔴" if calc_status == "MANUAL_REVIEW_NEEDED" else "🟡"
-                                st.markdown(f"{calc_color} Refund Calculations: {calc_status}")
-                                if result.get('Refund Calculation Issues'):
-                                    st.markdown(f"   └─ Issues: {result.get('Refund Calculation Issues')}")
-                                
-                                # Show calculation details
-                                calc_details = result.get('Refund Calculation Details', {})
-                                if calc_details:
-                                    with st.expander("💰 Calculation Details"):
-                                        col1, col2 = st.columns(2)
-                                        with col1:
-                                            if calc_details.get('retail_purchase_price'):
-                                                st.write(f"**Retail Price:** ${calc_details['retail_purchase_price']:.2f}")
-                                            if calc_details.get('dealer_remitted_amount'):
-                                                st.write(f"**Dealer Remitted:** ${calc_details['dealer_remitted_amount']:.2f}")
-                                            if calc_details.get('cancel_fee'):
-                                                st.write(f"**Cancel Fee:** ${calc_details['cancel_fee']:.2f}")
-                                        with col2:
-                                            if calc_details.get('ascent_refund'):
-                                                st.write(f"**Ascent Refund:** ${calc_details['ascent_refund']:.2f}")
-                                            if calc_details.get('dealer_refund'):
-                                                st.write(f"**Dealer Refund:** ${calc_details['dealer_refund']:.2f}")
-                                            if calc_details.get('net_customer_refund'):
-                                                st.write(f"**Net Customer Refund:** ${calc_details['net_customer_refund']:.2f}")
-                                            if calc_details.get('refund_percentage'):
-                                                st.write(f"**Refund %:** {calc_details['refund_percentage']:.1f}%")
+                            calc_color = "🟢" if calc_status == "PASS" else "🔴" if calc_status == "MANUAL_REVIEW_NEEDED" else "🟡"
+                            st.markdown(f"{calc_color} Refund Calculations: {calc_status}")
+                            
+                            if result.get('Refund Calculation Issues'):
+                                st.markdown(f"   └─ Issues: {result.get('Refund Calculation Issues')}")
+                            
+                            # Show calculation details
+                            calc_details = result.get('Refund Calculation Details', {})
+                            if calc_details:
+                                with st.expander("💰 Calculation Details"):
+                                    col1, col2 = st.columns(2)
+                                    with col1:
+                                        if calc_details.get('retail_purchase_price'):
+                                            st.write(f"**Retail Price:** ${calc_details['retail_purchase_price']:.2f}")
+                                        if calc_details.get('dealer_remitted_amount'):
+                                            st.write(f"**Dealer Remitted:** ${calc_details['dealer_remitted_amount']:.2f}")
+                                        if calc_details.get('cancel_fee'):
+                                            st.write(f"**Cancel Fee:** ${calc_details['cancel_fee']:.2f}")
+                                    with col2:
+                                        if calc_details.get('ascent_refund'):
+                                            st.write(f"**Ascent Refund:** ${calc_details['ascent_refund']:.2f}")
+                                        if calc_details.get('dealer_refund'):
+                                            st.write(f"**Dealer Refund:** ${calc_details['dealer_refund']:.2f}")
+                                        if calc_details.get('net_customer_refund'):
+                                            st.write(f"**Net Customer Refund:** ${calc_details['net_customer_refund']:.2f}")
+                                        if calc_details.get('refund_percentage'):
+                                            st.write(f"**Refund %:** {calc_details['refund_percentage']:.1f}%")
+                            else:
+                                st.markdown(f"   └─ No calculation data found in any files")
                         
                         # Show screenshot details if this packet has bucket screenshots
                         packet_files = result.get('Files', '').split(', ')
