@@ -248,20 +248,26 @@ class PreciseTextProcessor:
             5. Sale Date: Contract sale date in MM/DD/YYYY format (look for "Sale Date:", "Contract Date:", "Purchase Date:")
             6. Mileage: 4-6 digit number (look for "Mileage:", "Miles:", "Odometer:")
             7. Total Refund: Dollar amount with $ symbol (look for "Refund:", "Total:", "Amount:")
-            8. Dealer NCB: Yes/No (look for "NCB:", "No Chargeback:", "Dealer NCB:")
-            9. No Chargeback: Yes/No (look for "No Chargeback:", "Chargeback:")
+            8. Dealer NCB: Yes/No (look for "NCB:", "No Chargeback:", "Dealer NCB:", "Dealer Remitted Amount", "Cancel Fee")
+            9. No Chargeback: Yes/No (look for "No Chargeback:", "Chargeback:", "Paid Ascent", "Dealer Profit Claim")
             10. Reason: Cancellation reason (look for "Reason:", "Cancellation Reason:", "Why:")
 
             CRITICAL RULES:
             - Only extract data that is CLEARLY LABELED
             - VIN must be exactly 17 alphanumeric characters
             - Contract must start with PN/PT/GAP/DL
-            - Customer name must be exactly 2 words (First Last)
+            - Customer name must be exactly 2 words (First Last) - normalize case
             - Dates must be in MM/DD/YYYY format
             - Mileage must be 4-6 digits only
             - Money must include $ symbol
-            - NCB/Chargeback must be Yes or No only
+            - NCB/Chargeback: Look for financial amounts, fees, or explicit Yes/No indicators
             - Reason must be specific (Customer Request, Loan Payoff, Vehicle Traded, etc.)
+
+            SPECIAL INSTRUCTIONS:
+            - For NCB: If you see "Dealer Remitted Amount" or "Cancel Fee" with amounts, mark as "Yes"
+            - For No Chargeback: If you see "Paid Ascent" or "Dealer Profit Claim" with amounts, mark as "Yes"
+            - For Customer Name: Normalize to "First Last" format (e.g., "CARMYN TALENTO" → "Carmyn Talento")
+            - For Reason: Extract the main reason, not detailed explanations
 
             IMPORTANT: If you cannot find a field, return null. Do not guess or make up data.
 
@@ -380,7 +386,11 @@ class PreciseTextProcessor:
             r'PN([A-Z0-9]{6,20})',  # PN followed directly by number
             r'PT([A-Z0-9]{6,20})',  # PT followed directly by number
             r'GAP([A-Z0-9]{6,20})', # GAP followed directly by number
-            r'DL([A-Z0-9]{6,20})'   # DL followed directly by number
+            r'DL([A-Z0-9]{6,20})',  # DL followed directly by number
+            r'\b(PN\d{6,20})\b',    # Full PN contract number
+            r'\b(PT\d{6,20})\b',    # Full PT contract number
+            r'\b(GAP\d{6,20})\b',   # Full GAP contract number
+            r'\b(DL\d{6,20})\b'     # Full DL contract number
         ]
         
         contracts = []
@@ -391,7 +401,17 @@ class PreciseTextProcessor:
                 if (len(match) >= 6 and len(match) <= 20 and 
                     match.isalnum() and 
                     match not in ['Customer', 'IONAgent', '510212066', 'RESERVELADDLRESERVE2', 'RNCBOFFSETADMINTOTAL']):
-                    contracts.append(match)
+                    # Add prefix if it's just the number part
+                    if pattern.startswith(r'PN('):
+                        contracts.append(f'PN{match}')
+                    elif pattern.startswith(r'PT('):
+                        contracts.append(f'PT{match}')
+                    elif pattern.startswith(r'GAP('):
+                        contracts.append(f'GAP{match}')
+                    elif pattern.startswith(r'DL('):
+                        contracts.append(f'DL{match}')
+                    else:
+                        contracts.append(match)
         data['contract_number'] = list(set(contracts))
         
         # Customer name extraction - ENHANCED patterns
@@ -539,6 +559,12 @@ class PreciseTextProcessor:
         
         ncb_values = []
         chargeback_values = []
+        
+        # Look for specific financial patterns that indicate NCB
+        if 'Dealer Remitted Amount' in text and 'Cancel Fee' in text:
+            ncb_values.append('Yes')
+        if 'Paid Ascent' in text and 'Dealer Profit Claim' in text:
+            chargeback_values.append('Yes')
         
         for pattern in ncb_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
