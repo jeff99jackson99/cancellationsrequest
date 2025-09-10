@@ -1089,6 +1089,171 @@ class CancellationProcessor:
         
         return None
     
+    def validate_refund_calculations(self, text):
+        """Validate refund calculations from bucket screenshots"""
+        calculations = {
+            'retail_purchase_price': None,
+            'dealer_remitted_amount': None,
+            'cancel_fee': None,
+            'refund_percentage': None,
+            'ascent_refund': None,
+            'dealer_refund': None,
+            'net_customer_refund': None,
+            'total_refund': None
+        }
+        
+        # Extract monetary values
+        money_patterns = [
+            r'\$([0-9,]+\.?[0-9]*)',
+            r'([0-9,]+\.?[0-9]*)\s*dollars?',
+            r'([0-9,]+\.?[0-9]*)\s*USD'
+        ]
+        
+        # Extract percentage
+        percent_pattern = r'([0-9,]+\.?[0-9]*)\s*%'
+        
+        # Find all monetary values
+        money_values = []
+        for pattern in money_patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            for match in matches:
+                try:
+                    value = float(match.replace(',', ''))
+                    money_values.append(value)
+                except ValueError:
+                    continue
+        
+        # Find percentage
+        percent_match = re.search(percent_pattern, text)
+        if percent_match:
+            try:
+                calculations['refund_percentage'] = float(percent_match.group(1))
+            except ValueError:
+                pass
+        
+        # Try to identify values by context
+        lines = text.split('\n')
+        for line in lines:
+            line_lower = line.lower()
+            
+            # Look for specific labels
+            if 'retail' in line_lower and 'purchase' in line_lower and 'price' in line_lower:
+                for value in money_values:
+                    if value > 1000:  # Reasonable retail price
+                        calculations['retail_purchase_price'] = value
+                        break
+            
+            elif 'dealer' in line_lower and 'remitted' in line_lower:
+                for value in money_values:
+                    if 500 < value < 5000:  # Reasonable dealer amount
+                        calculations['dealer_remitted_amount'] = value
+                        break
+            
+            elif 'cancel' in line_lower and 'fee' in line_lower:
+                for value in money_values:
+                    if 0 < value < 1000:  # Reasonable cancel fee
+                        calculations['cancel_fee'] = value
+                        break
+            
+            elif 'ascent' in line_lower and 'refund' in line_lower:
+                for value in money_values:
+                    if value > 0:
+                        calculations['ascent_refund'] = value
+                        break
+            
+            elif 'dealer' in line_lower and 'refund' in line_lower and 'ascent' not in line_lower:
+                for value in money_values:
+                    if value >= 0:
+                        calculations['dealer_refund'] = value
+                        break
+            
+            elif 'net' in line_lower and 'customer' in line_lower and 'refund' in line_lower:
+                for value in money_values:
+                    if value > 0:
+                        calculations['net_customer_refund'] = value
+                        break
+        
+        # If we couldn't identify by context, try to assign by value ranges
+        if not calculations['retail_purchase_price'] and money_values:
+            # Largest value is likely retail price
+            calculations['retail_purchase_price'] = max(money_values)
+        
+        if not calculations['dealer_remitted_amount'] and len(money_values) >= 2:
+            # Second largest is likely dealer amount
+            sorted_values = sorted(money_values, reverse=True)
+            calculations['dealer_remitted_amount'] = sorted_values[1]
+        
+        if not calculations['cancel_fee'] and len(money_values) >= 3:
+            # Third largest or smallest non-zero is likely cancel fee
+            sorted_values = sorted(money_values, reverse=True)
+            for value in sorted_values:
+                if 0 < value < 1000:
+                    calculations['cancel_fee'] = value
+                    break
+        
+        # Calculate total refund
+        if calculations['ascent_refund'] and calculations['dealer_refund']:
+            calculations['total_refund'] = calculations['ascent_refund'] + calculations['dealer_refund']
+        elif calculations['net_customer_refund']:
+            calculations['total_refund'] = calculations['net_customer_refund']
+        
+        return calculations
+    
+    def check_calculation_accuracy(self, calculations):
+        """Check if the refund calculations are mathematically correct"""
+        issues = []
+        status = "PASS"
+        
+        retail = calculations.get('retail_purchase_price')
+        dealer_remitted = calculations.get('dealer_remitted_amount')
+        cancel_fee = calculations.get('cancel_fee')
+        refund_pct = calculations.get('refund_percentage')
+        ascent_refund = calculations.get('ascent_refund')
+        dealer_refund = calculations.get('dealer_refund')
+        net_customer_refund = calculations.get('net_customer_refund')
+        total_refund = calculations.get('total_refund')
+        
+        # Check 1: Refund percentage should be 100% for full refunds
+        if refund_pct is not None and abs(refund_pct - 100.0) > 0.1:
+            issues.append(f"Refund percentage is {refund_pct}% instead of expected 100%")
+            status = "MANUAL_REVIEW_NEEDED"
+        
+        # Check 2: Total refund should equal retail purchase price
+        if retail and total_refund and abs(total_refund - retail) > 0.01:
+            issues.append(f"Total refund (${total_refund:.2f}) doesn't match retail price (${retail:.2f})")
+            status = "MANUAL_REVIEW_NEEDED"
+        
+        # Check 3: Dealer remitted + cancel fee should equal retail price
+        if dealer_remitted and cancel_fee and retail:
+            expected_retail = dealer_remitted + cancel_fee
+            if abs(expected_retail - retail) > 0.01:
+                issues.append(f"Dealer remitted (${dealer_remitted:.2f}) + Cancel fee (${cancel_fee:.2f}) = ${expected_retail:.2f}, but retail price is ${retail:.2f}")
+                status = "MANUAL_REVIEW_NEEDED"
+        
+        # Check 4: Net customer refund should equal total refund
+        if net_customer_refund and total_refund and abs(net_customer_refund - total_refund) > 0.01:
+            issues.append(f"Net customer refund (${net_customer_refund:.2f}) doesn't match total refund (${total_refund:.2f})")
+            status = "MANUAL_REVIEW_NEEDED"
+        
+        # Check 5: Ascent refund + dealer refund should equal total refund
+        if ascent_refund is not None and dealer_refund is not None and total_refund:
+            expected_total = ascent_refund + dealer_refund
+            if abs(expected_total - total_refund) > 0.01:
+                issues.append(f"Ascent refund (${ascent_refund:.2f}) + Dealer refund (${dealer_refund:.2f}) = ${expected_total:.2f}, but total refund is ${total_refund:.2f}")
+                status = "MANUAL_REVIEW_NEEDED"
+        
+        # Check 6: All values should be positive (except dealer refund which can be 0)
+        for key, value in calculations.items():
+            if value is not None and value < 0 and key != 'dealer_refund':
+                issues.append(f"{key.replace('_', ' ').title()} is negative: ${value:.2f}")
+                status = "MANUAL_REVIEW_NEEDED"
+        
+        return {
+            'status': status,
+            'issues': issues,
+            'calculations': calculations
+        }
+    
     def reconcile_values(self, values):
         """Reconcile multiple values and return status and canonical value"""
         # Remove empty values and duplicates while preserving order
@@ -1389,6 +1554,30 @@ class CancellationProcessor:
         else:
             result['PCMI Screenshot (Of NCB fee buckets)'] = 'Not found'
             result['Total NCB Amount'] = ''
+        
+        # Refund calculation validation
+        calculation_status = "INFO"
+        calculation_issues = []
+        calculation_details = {}
+        
+        # Check if any files contain bucket/refund information
+        bucket_files = [f for f in files if f.get('has_pcmi_hint', False) or 'bucket' in f.get('filename', '').lower()]
+        
+        if bucket_files:
+            # Extract calculations from bucket files
+            for file_data in bucket_files:
+                if file_data.get('raw_text'):
+                    calculations = self.validate_refund_calculations(file_data['raw_text'])
+                    if any(calculations.values()):
+                        calculation_details = calculations
+                        validation_result = self.check_calculation_accuracy(calculations)
+                        calculation_status = validation_result['status']
+                        calculation_issues = validation_result['issues']
+                        break
+        
+        result['Refund Calculation Status'] = calculation_status
+        result['Refund Calculation Issues'] = '; '.join(calculation_issues) if calculation_issues else ''
+        result['Refund Calculation Details'] = calculation_details
         
         # Mileage - show all detected mileages
         if all_mileages:
@@ -1796,6 +1985,36 @@ def main():
                                     st.markdown(f"   └─ Multiple different mileages found - needs review")
                                 elif mileage_status == "PASS":
                                     st.markdown(f"   └─ All mileages match")
+                            
+                            # Refund Calculations
+                            calc_status = result.get('Refund Calculation Status', 'INFO')
+                            if calc_status != "INFO":
+                                calc_color = "🟢" if calc_status == "PASS" else "🔴" if calc_status == "MANUAL_REVIEW_NEEDED" else "🟡"
+                                st.markdown(f"{calc_color} Refund Calculations: {calc_status}")
+                                if result.get('Refund Calculation Issues'):
+                                    st.markdown(f"   └─ Issues: {result.get('Refund Calculation Issues')}")
+                                
+                                # Show calculation details
+                                calc_details = result.get('Refund Calculation Details', {})
+                                if calc_details:
+                                    with st.expander("💰 Calculation Details"):
+                                        col1, col2 = st.columns(2)
+                                        with col1:
+                                            if calc_details.get('retail_purchase_price'):
+                                                st.write(f"**Retail Price:** ${calc_details['retail_purchase_price']:.2f}")
+                                            if calc_details.get('dealer_remitted_amount'):
+                                                st.write(f"**Dealer Remitted:** ${calc_details['dealer_remitted_amount']:.2f}")
+                                            if calc_details.get('cancel_fee'):
+                                                st.write(f"**Cancel Fee:** ${calc_details['cancel_fee']:.2f}")
+                                        with col2:
+                                            if calc_details.get('ascent_refund'):
+                                                st.write(f"**Ascent Refund:** ${calc_details['ascent_refund']:.2f}")
+                                            if calc_details.get('dealer_refund'):
+                                                st.write(f"**Dealer Refund:** ${calc_details['dealer_refund']:.2f}")
+                                            if calc_details.get('net_customer_refund'):
+                                                st.write(f"**Net Customer Refund:** ${calc_details['net_customer_refund']:.2f}")
+                                            if calc_details.get('refund_percentage'):
+                                                st.write(f"**Refund %:** {calc_details['refund_percentage']:.1f}%")
                         
                         # Show screenshot details if this packet has bucket screenshots
                         packet_files = result.get('Files', '').split(', ')
