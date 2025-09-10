@@ -470,6 +470,222 @@ class CancellationProcessor:
         self.packets = {}
         self.screenshot_processor = ScreenshotProcessor()
         
+    def extract_text_from_pdf_advanced(self, file_path):
+        """Advanced PDF text extraction using the most powerful methods available"""
+        text_results = []
+        
+        # Method 1: pdfplumber (best for structured text and tables)
+        try:
+            with pdfplumber.open(file_path) as pdf:
+                pdfplumber_text = ""
+                for page in pdf.pages:
+                    # Extract text
+                    page_text = page.extract_text()
+                    if page_text:
+                        pdfplumber_text += page_text + "\n"
+                    
+                    # Extract tables
+                    tables = page.extract_tables()
+                    for table in tables:
+                        for row in table:
+                            if row:
+                                table_text = " ".join([cell for cell in row if cell])
+                                if table_text.strip():
+                                    pdfplumber_text += table_text + "\n"
+                
+                if pdfplumber_text.strip():
+                    text_results.append(("pdfplumber", pdfplumber_text))
+                    print(f"PDF extraction method 1 (pdfplumber): {len(pdfplumber_text)} chars")
+        except Exception as e:
+            print(f"PDF extraction method 1 failed: {e}")
+        
+        # Method 2: PyMuPDF (fitz) - excellent for complex layouts
+        try:
+            import fitz
+            doc = fitz.open(file_path)
+            fitz_text = ""
+            for page_num in range(doc.page_count):
+                page = doc[page_num]
+                # Get text with layout preservation
+                text_dict = page.get_text("dict")
+                for block in text_dict["blocks"]:
+                    if "lines" in block:
+                        for line in block["lines"]:
+                            for span in line["spans"]:
+                                fitz_text += span["text"] + " "
+                            fitz_text += "\n"
+                fitz_text += "\n"
+            doc.close()
+            if fitz_text.strip():
+                text_results.append(("fitz", fitz_text))
+                print(f"PDF extraction method 2 (fitz): {len(fitz_text)} chars")
+        except Exception as e:
+            print(f"PDF extraction method 2 failed: {e}")
+        
+        # Method 3: pdfminer.six - robust text extraction
+        try:
+            from pdfminer.high_level import extract_text
+            from pdfminer.layout import LAParams
+            from pdfminer.converter import TextConverter
+            from pdfminer.pdfinterp import PDFResourceManager, PDFPageInterpreter
+            from pdfminer.pdfpage import PDFPage
+            from io import StringIO
+            
+            # Extract with layout analysis
+            laparams = LAParams(word_margin=0.1, char_margin=2.0, line_margin=0.5)
+            pdfminer_text = extract_text(file_path, laparams=laparams)
+            if pdfminer_text.strip():
+                text_results.append(("pdfminer", pdfminer_text))
+                print(f"PDF extraction method 3 (pdfminer): {len(pdfminer_text)} chars")
+        except Exception as e:
+            print(f"PDF extraction method 3 failed: {e}")
+        
+        # Method 4: pymupdf4llm - AI-optimized extraction
+        try:
+            import pymupdf4llm
+            pymupdf4llm_text = pymupdf4llm.to_markdown(file_path)
+            if pymupdf4llm_text.strip():
+                text_results.append(("pymupdf4llm", pymupdf4llm_text))
+                print(f"PDF extraction method 4 (pymupdf4llm): {len(pymupdf4llm_text)} chars")
+        except Exception as e:
+            print(f"PDF extraction method 4 failed: {e}")
+        
+        # Method 5: OCR with multiple engines for scanned PDFs
+        try:
+            if PDF2IMAGE_AVAILABLE:
+                images = convert_from_path(file_path, dpi=300)
+                ocr_text = ""
+                
+                for i, image in enumerate(images):
+                    # Try multiple OCR engines
+                    page_text = ""
+                    
+                    # Tesseract OCR
+                    try:
+                        if OPENCV_AVAILABLE:
+                            screenshot_processor = ScreenshotProcessor()
+                            processed_image = screenshot_processor.preprocess_image(image)
+                            tesseract_text = pytesseract.image_to_string(processed_image, config='--psm 6 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,;:()[]{}\"/- ')
+                        else:
+                            tesseract_text = pytesseract.image_to_string(image, config='--psm 6')
+                        if tesseract_text.strip():
+                            page_text += f"[TESSERACT] {tesseract_text}\n"
+                    except Exception as e:
+                        print(f"Tesseract OCR failed for page {i}: {e}")
+                    
+                    # EasyOCR
+                    try:
+                        import easyocr
+                        reader = easyocr.Reader(['en'])
+                        easyocr_results = reader.readtext(image)
+                        easyocr_text = " ".join([result[1] for result in easyocr_results])
+                        if easyocr_text.strip():
+                            page_text += f"[EASYOCR] {easyocr_text}\n"
+                    except Exception as e:
+                        print(f"EasyOCR failed for page {i}: {e}")
+                    
+                    # PaddleOCR
+                    try:
+                        from paddleocr import PaddleOCR
+                        ocr = PaddleOCR(use_angle_cls=True, lang='en')
+                        paddleocr_results = ocr.ocr(image)
+                        if paddleocr_results and paddleocr_results[0]:
+                            paddleocr_text = " ".join([line[1][0] for line in paddleocr_results[0]])
+                            if paddleocr_text.strip():
+                                page_text += f"[PADDLEOCR] {paddleocr_text}\n"
+                    except Exception as e:
+                        print(f"PaddleOCR failed for page {i}: {e}")
+                    
+                    ocr_text += page_text + "\n"
+                
+                if ocr_text.strip():
+                    text_results.append(("ocr", ocr_text))
+                    print(f"PDF extraction method 5 (OCR): {len(ocr_text)} chars")
+        except Exception as e:
+            print(f"PDF extraction method 5 failed: {e}")
+        
+        # Choose the best result based on quality metrics
+        if not text_results:
+            return ""
+        
+        # Score each method based on text quality indicators
+        scored_results = []
+        for method, text in text_results:
+            score = self.score_text_quality(text)
+            scored_results.append((score, method, text))
+            print(f"Text quality score for {method}: {score}")
+        
+        # Sort by quality score (higher is better)
+        scored_results.sort(key=lambda x: x[0], reverse=True)
+        
+        best_method, best_text = scored_results[0][1], scored_results[0][2]
+        print(f"Selected PDF extraction method: {best_method} (score: {scored_results[0][0]})")
+        
+        return self.clean_text_for_extraction(best_text)
+    
+    def score_text_quality(self, text):
+        """Score text quality based on various indicators"""
+        if not text or len(text.strip()) < 10:
+            return 0
+        
+        score = 0
+        
+        # Length bonus (but not too long)
+        text_len = len(text.strip())
+        if 100 <= text_len <= 10000:
+            score += 10
+        elif text_len > 10000:
+            score += 5
+        
+        # Check for common document patterns
+        patterns = [
+            r'\bVIN\s*:?\s*[A-Z0-9]{17}',  # VIN pattern
+            r'\bContract\s*#?\s*:?\s*\d+',  # Contract number
+            r'\b\d{1,2}/\d{1,2}/\d{2,4}',  # Date pattern
+            r'\$\d+\.?\d*',  # Money amounts
+            r'\b[A-Z][a-z]+\s+[A-Z][a-z]+',  # Names
+        ]
+        
+        for pattern in patterns:
+            if re.search(pattern, text, re.IGNORECASE):
+                score += 5
+        
+        # Penalize for too many special characters or OCR artifacts
+        special_char_ratio = len(re.findall(r'[^\w\s.,;:()\[\]{}"/-]', text)) / len(text)
+        if special_char_ratio > 0.1:
+            score -= 10
+        
+        # Bonus for structured text (lines with colons)
+        structured_lines = len(re.findall(r'^[^:]+:', text, re.MULTILINE))
+        score += min(structured_lines * 2, 20)
+        
+        # Bonus for reasonable word count
+        words = text.split()
+        if 20 <= len(words) <= 2000:
+            score += 10
+        
+        return max(0, score)
+
+    def clean_text_for_extraction(self, text):
+        """Clean and normalize text for better data extraction"""
+        if not text:
+            return ""
+        
+        # Normalize whitespace and line breaks
+        text = re.sub(r'\s+', ' ', text)
+        text = re.sub(r'\n+', '\n', text)
+        
+        # Remove common OCR artifacts
+        text = re.sub(r'[^\w\s.,/-:()[]{}"\'$%]', ' ', text)
+        
+        # Normalize common variations
+        text = re.sub(r'\bVIN\s*#?\s*:', 'VIN:', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bContract\s*#?\s*:', 'Contract:', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bSale\s*Date\s*:', 'Sale Date:', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bCancellation\s*Date\s*:', 'Cancellation Date:', text, flags=re.IGNORECASE)
+        
+        return text.strip()
+
     def extract_text_from_file(self, file_path):
         """Extract text from various file types"""
         text = ""
@@ -477,9 +693,7 @@ class CancellationProcessor:
         
         try:
             if file_ext == '.pdf':
-                with pdfplumber.open(file_path) as pdf:
-                    for page in pdf.pages:
-                        text += page.extract_text() or ""
+                text = self.extract_text_from_pdf_advanced(file_path)
             elif file_ext in ['.docx']:
                 doc = Document(file_path)
                 for paragraph in doc.paragraphs:
@@ -628,11 +842,17 @@ class CancellationProcessor:
             r'Contract[:\s]*([A-Z0-9]+)',
             r'CN[:\s]*([A-Z0-9]+)',
             r'#([A-Z0-9]{8,})',  # Hash followed by contract
+            # Add specific patterns for test data - more specific
+            r'Contract\s*Number[:\s]*(\d{9})',  # 9-digit numbers
+            r'Contract\s*#?\s*:?\s*(\d{9})',  # Contract #: 123456789
+            r'Contract\s*#?\s*:?\s*(\d+)',  # Any digits after Contract #
+            r'Contract\s*#\s*(\d+)',  # Contract # 123456789
+            r'Contract\s*Number\s*(\d+)',  # Contract Number 123456789
         ]
         
         contracts = []
         for pattern in contract_patterns:
-            matches = re.findall(pattern, text.upper())
+            matches = re.findall(pattern, text, re.IGNORECASE)
             contracts.extend(matches)
         
         # Filter out obviously non-contract numbers
@@ -649,8 +869,8 @@ class CancellationProcessor:
         
         # Reason extraction - very conservative patterns
         reason_patterns = [
-            r'Reason[:\s]+([A-Za-z\s]{3,30})',
             r'Cancellation\s+Reason[:\s]+([A-Za-z\s]{3,30})',
+            r'Reason[:\s]+([A-Za-z\s]{3,30})',
             r'Customer\s+Request[:\s]*([A-Za-z\s]{3,30})',
             r'Vehicle\s+Traded[:\s]*([A-Za-z\s]{3,30})',
             r'Total\s+Loss[:\s]*([A-Za-z\s]{3,30})',
@@ -664,7 +884,7 @@ class CancellationProcessor:
                 reason = match.strip()
                 if (len(reason) >= 3 and len(reason) <= 30 and  # Reasonable length
                     not any(char.isdigit() for char in reason) and  # No numbers
-                    reason.lower() not in ['reason', 'cause', 'cancellation', 'cancel', 'customer', 'request'] and
+                    reason.lower() not in ['reason', 'cause', 'cancellation', 'cancel', 'customer', 'request', 'vehicle', 'information'] and
                     len(reason.split()) <= 3):  # Not too many words
                     reasons.append(reason)
         
@@ -760,6 +980,9 @@ class CancellationProcessor:
             r'odom[:\s]*([0-9,]+)',
             r'mileage[:\s]*([0-9,]+)',
             r'(\d{1,6}(?:,\d{3})*)\s*(?:miles?|mi\.?)',
+            # More specific patterns to avoid years
+            r'Mileage[:\s]+([0-9,]+)',
+            r'Odometer[:\s]+([0-9,]+)',
         ]
         
         mileages = []
@@ -774,7 +997,8 @@ class CancellationProcessor:
             try:
                 mileage_num = int(mileage.replace(',', ''))
                 # More restrictive mileage range: 1,000 to 500,000 (typical car mileage)
-                if 1000 <= mileage_num <= 500000:
+                # Exclude common years (1900-2030)
+                if 1000 <= mileage_num <= 500000 and not (1900 <= mileage_num <= 2030):
                     filtered_mileages.append(mileage)
             except ValueError:
                 continue
@@ -787,6 +1011,8 @@ class CancellationProcessor:
             r'Name[:\s]+([A-Z][a-z]+\s+[A-Z][a-z]+)',  # Name: First Last
             r'Buyer[:\s]+([A-Z][a-z]+\s+[A-Z][a-z]+)',  # Buyer: First Last
             r'Purchaser[:\s]+([A-Z][a-z]+\s+[A-Z][a-z]+)',  # Purchaser: First Last
+            r'Customer[:\s]+([A-Z][a-z]+\s+[A-Z][a-z]+)',  # Customer: First Last
+            r'Client[:\s]+([A-Z][a-z]+\s+[A-Z][a-z]+)',  # Client: First Last
         ]
         
         for pattern in customer_patterns:
@@ -921,10 +1147,51 @@ class CancellationProcessor:
             fields['has_dealer_ncb'] = ncb_data['has_dealer_ncb']
             
             # Also extract sale date and contract number from NCB data
-            if ncb_data['sale_date']:
-                fields['sale_dates'].append(ncb_data['sale_date'])
-            if ncb_data['contract_number']:
-                fields['contracts'].append(ncb_data['contract_number'])
+        if 'ncb_data' in locals() and ncb_data['sale_date']:
+            fields['sale_dates'].append(ncb_data['sale_date'])
+        if 'ncb_data' in locals() and ncb_data['contract_number']:
+            fields['contracts'].append(ncb_data['contract_number'])
+        
+        # Financial data extraction
+        # Total refund patterns
+        refund_patterns = [
+            r'Total\s+Refund[:\s]*(\$?[0-9,]+\.?[0-9]*)',
+            r'Refund\s+Amount[:\s]*(\$?[0-9,]+\.?[0-9]*)',
+            r'Refund[:\s]*(\$?[0-9,]+\.?[0-9]*)',
+        ]
+        
+        refunds = []
+        for pattern in refund_patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            refunds.extend(matches)
+        
+        fields['total_refund'] = refunds[0] if refunds else None
+        
+        # Dealer NCB patterns
+        ncb_patterns = [
+            r'Dealer\s+NCB[:\s]*(Yes|No|Y|N)',
+            r'NCB[:\s]*(Yes|No|Y|N)',
+        ]
+        
+        ncb_values = []
+        for pattern in ncb_patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            ncb_values.extend(matches)
+        
+        fields['dealer_ncb'] = ncb_values[0] if ncb_values else None
+        
+        # No Chargeback patterns
+        chargeback_patterns = [
+            r'No\s+Chargeback[:\s]*(Yes|No|Y|N)',
+            r'Chargeback[:\s]*(Yes|No|Y|N)',
+        ]
+        
+        chargeback_values = []
+        for pattern in chargeback_patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            chargeback_values.extend(matches)
+        
+        fields['no_chargeback'] = chargeback_values[0] if chargeback_values else None
         
         return fields
     
