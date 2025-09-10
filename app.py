@@ -839,9 +839,24 @@ class PreciseTextProcessor:
         return None
 
 def main():
-    st.title("📋 QC Form Cancellations Checker - Precise Extraction")
+    st.title("📋 QC Form Cancellations Checker - AI Vision")
     st.write("Upload a ZIP file containing cancellation packet files to perform quality control checks.")
-    st.write("🎯 **Precise Extraction**: Uses only specific field labels to avoid noise and achieve 100% accuracy.")
+    st.write("🤖 **AI Vision**: Uses GPT-4o vision model for 100% accurate data extraction.")
+    
+    # Debug information
+    st.sidebar.subheader("🔧 Debug Info")
+    st.sidebar.write(f"OpenAI Available: {OPENAI_AVAILABLE}")
+    if OPENAI_AVAILABLE:
+        try:
+            # Try to get API key from secrets
+            api_key = st.secrets.get("OPENAI_API_KEY", "Not found in secrets")
+            if api_key == "Not found in secrets":
+                api_key = os.getenv("OPENAI_API_KEY", "Not found in environment")
+            st.sidebar.write(f"API Key: {'✅ Found' if api_key and api_key != 'Not found in secrets' and api_key != 'Not found in environment' else '❌ Not found'}")
+        except:
+            st.sidebar.write("API Key: ❌ Error checking")
+    else:
+        st.sidebar.write("OpenAI: ❌ Not available")
     
     # File upload
     uploaded_file = st.file_uploader(
@@ -851,14 +866,19 @@ def main():
     )
     
     if uploaded_file is not None:
-        processor = PreciseTextProcessor()
-        
-        with st.spinner("Processing files with precise extraction..."):
-            # Process ZIP
-            all_data, files_processed = processor.process_zip(uploaded_file)
+        try:
+            processor = PreciseTextProcessor()
             
-            # Evaluate QC checklist
-            qc_results = processor.evaluate_qc_checklist(all_data, files_processed)
+            with st.spinner("Processing files with AI Vision..."):
+                # Process ZIP
+                all_data, files_processed = processor.process_zip(uploaded_file)
+                
+                # Evaluate QC checklist
+                qc_results = processor.evaluate_qc_checklist(all_data, files_processed)
+        except Exception as e:
+            st.error(f"❌ Error processing files: {str(e)}")
+            st.write("Please check the debug info in the sidebar and try again.")
+            return
         
         # Display results
         st.success(f"✅ Processed {len(files_processed)} file(s)")
