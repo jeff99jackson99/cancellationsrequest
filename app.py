@@ -2066,6 +2066,33 @@ def main():
                         
                         st.markdown(f"**Files:** {result['Files']}")
                         
+                        # Display file thumbnails
+                        st.markdown("**File Thumbnails:**")
+                        file_list = result['Files'].split(', ')
+                        if file_list:
+                            cols = st.columns(min(len(file_list), 4))
+                            for idx, filename in enumerate(file_list):
+                                with cols[idx % 4]:
+                                    # Find the file data
+                                    file_data = None
+                                    for f in processor.files_data:
+                                        if f['filename'] == filename.strip():
+                                            file_data = f
+                                            break
+                                    
+                                    if file_data:
+                                        try:
+                                            # Create thumbnail
+                                            thumbnail = processor.create_thumbnail(file_data, temp_dir)
+                                            if thumbnail:
+                                                st.image(thumbnail, caption=filename.strip(), width=120)
+                                            else:
+                                                st.write(f"📄 {filename.strip()}")
+                                        except Exception as e:
+                                            st.write(f"📄 {filename.strip()}")
+                                    else:
+                                        st.write(f"📄 {filename.strip()}")
+                        
                         # Show source data if available
                         if '_source_data' in result:
                             with st.expander("📋 View Data Sources"):
@@ -2138,6 +2165,33 @@ def main():
                                 st.markdown(f"   └─ Reason: {result.get('Reason (canonical)')}")
                                 if result.get('Handwritten Files'):
                                     st.markdown(f"   └─ Handwritten Files: {', '.join(result['Handwritten Files'])}")
+                                    # Display thumbnails for handwritten files
+                                    st.markdown("   **Handwritten File Thumbnails:**")
+                                    handwritten_files = result['Handwritten Files']
+                                    if handwritten_files:
+                                        # Create columns for thumbnails
+                                        cols = st.columns(min(len(handwritten_files), 3))
+                                        for idx, filename in enumerate(handwritten_files):
+                                            with cols[idx % 3]:
+                                                # Find the file data
+                                                file_data = None
+                                                for f in processor.files_data:
+                                                    if f['filename'] == filename:
+                                                        file_data = f
+                                                        break
+                                                
+                                                if file_data:
+                                                    try:
+                                                        # Create thumbnail
+                                                        thumbnail = processor.create_thumbnail(file_data, temp_dir)
+                                                        if thumbnail:
+                                                            st.image(thumbnail, caption=filename, width=150)
+                                                        else:
+                                                            st.write(f"📄 {filename}")
+                                                    except Exception as e:
+                                                        st.write(f"📄 {filename}")
+                                                else:
+                                                    st.write(f"📄 {filename}")
                             else:
                                 reason_color = "🟢" if reason_status == "PASS" else "🔴" if reason_status == "FAIL" else "🟡"
                                 st.markdown(f"{reason_color} Reason Match across all forms: {reason_status}")
@@ -2190,6 +2244,23 @@ def main():
                             sig_status = result.get('All necessary signatures collected?', 'Needs manual check')
                             sig_color = "🟢" if "Likely" in sig_status else "🔴" if "Needs manual check" in sig_status else "🟡"
                             st.markdown(f"{sig_color} Signatures: {sig_status}")
+                            
+                            # Display signature images if available
+                            if result.get('Signature Images'):
+                                st.markdown("**Signature Images:**")
+                                sig_images = result['Signature Images']
+                                if sig_images:
+                                    cols = st.columns(min(len(sig_images), 3))
+                                    for idx, img_path in enumerate(sig_images):
+                                        with cols[idx % 3]:
+                                            if img_path and os.path.exists(img_path):
+                                                try:
+                                                    img = Image.open(img_path)
+                                                    st.image(img, caption=f"Signature {idx+1}", width=100)
+                                                except Exception as e:
+                                                    st.write(f"📷 Signature {idx+1}")
+                                            else:
+                                                st.write(f"📷 Signature {idx+1}")
                             
                             # Autohouse
                             autohouse = result.get('Is this an Autohouse Contract?', 'No')
