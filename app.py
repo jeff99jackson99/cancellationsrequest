@@ -222,8 +222,37 @@ class CancellationProcessor:
         except:
             return False
     
+    def is_handwritten_document(self, file_path, text):
+        """Determine if document is likely handwritten based on OCR characteristics"""
+        if not text or len(text.strip()) < 10:
+            return False
+            
+        # Indicators of handwritten text
+        handwritten_indicators = [
+            # OCR confidence patterns (handwritten text often has lower confidence)
+            len(text.split()) < 20,  # Very few words extracted
+            len([c for c in text if c.isalpha()]) / max(len(text), 1) < 0.3,  # Low letter ratio
+            text.count(' ') / max(len(text.split()), 1) > 0.5,  # Many spaces (OCR struggling)
+            # Common OCR errors with handwritten text
+            text.count('|') > 2,  # Vertical lines often misread
+            text.count('l') > text.count('I') * 2,  # Lowercase l vs uppercase I confusion
+            text.count('0') > text.count('O') * 2,  # Zero vs O confusion
+            # Inconsistent spacing and formatting
+            len([word for word in text.split() if len(word) == 1]) > len(text.split()) * 0.3,
+            # Very short or very long words (OCR struggling with handwriting)
+            any(len(word) > 20 for word in text.split()),
+            # Repeated characters (common in handwritten OCR)
+            any(text.count(char) > len(text) * 0.1 for char in set(text) if char.isalpha())
+        ]
+        
+        # If multiple indicators are present, likely handwritten
+        return sum(handwritten_indicators) >= 3
+    
     def extract_fields(self, text, filename, file_path=None):
         """Extract all relevant fields from text using regex patterns"""
+        # Check if document is handwritten
+        is_handwritten = self.is_handwritten_document(file_path, text) if file_path else False
+        
         fields = {
             'filename': filename,
             'vins': [],
@@ -242,6 +271,8 @@ class CancellationProcessor:
             'has_signature': False,
             'has_pcmi_hint': False,
             'is_lender_letter': False,
+            'is_handwritten': is_handwritten,
+            'raw_text': text,
             'agent_ncb_amount': None,
             'dealer_ncb_amount': None,
             'total_ncb_amount': None
@@ -510,6 +541,88 @@ class CancellationProcessor:
         
         return [best_reason] if best_reason else reasons
     
+    def display_file_content(self, file_data, temp_dir):
+        """Display file content for manual review"""
+        filename = file_data['filename']
+        file_path = os.path.join(temp_dir, filename)
+        
+        st.subheader(f"📄 {filename}")
+        
+        # Show file type and basic info
+        file_ext = os.path.splitext(filename)[1].lower()
+        st.write(f"**File Type:** {file_ext.upper()}")
+        
+        if file_data.get('is_handwritten', False):
+            st.warning("⚠️ **HANDWRITTEN DOCUMENT DETECTED** - Manual review required")
+        
+        # Display based on file type
+        if file_ext in ['.png', '.jpg', '.jpeg', '.tiff', '.tif']:
+            try:
+                image = Image.open(file_path)
+                st.image(image, caption=filename, use_column_width=True)
+                
+                # Show extracted text
+                if file_data.get('raw_text'):
+                    with st.expander("🔍 Extracted Text (OCR)"):
+                        st.text(file_data['raw_text'])
+                        
+            except Exception as e:
+                st.error(f"Error displaying image: {e}")
+                
+        elif file_ext == '.pdf':
+            try:
+                with open(file_path, 'rb') as f:
+                    # For PDFs, show extracted text
+                    if file_data.get('raw_text'):
+                        st.text_area("Extracted Text:", file_data['raw_text'], height=200)
+                    else:
+                        st.info("No text extracted from PDF")
+            except Exception as e:
+                st.error(f"Error reading PDF: {e}")
+                
+        elif file_ext in ['.docx', '.doc']:
+            try:
+                if file_data.get('raw_text'):
+                    st.text_area("Extracted Text:", file_data['raw_text'], height=200)
+                else:
+                    st.info("No text extracted from document")
+            except Exception as e:
+                st.error(f"Error reading document: {e}")
+                
+        elif file_ext == '.txt':
+            try:
+                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    content = f.read()
+                    st.text_area("File Content:", content, height=200)
+            except Exception as e:
+                st.error(f"Error reading text file: {e}")
+        
+        # Show extracted fields
+        with st.expander("📊 Extracted Data"):
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if file_data.get('vins'):
+                    st.write("**VINs:**", ", ".join(file_data['vins']))
+                if file_data.get('contracts'):
+                    st.write("**Contracts:**", ", ".join(file_data['contracts']))
+                if file_data.get('reasons'):
+                    st.write("**Reasons:**", ", ".join(file_data['reasons']))
+                if file_data.get('cancellation_dates'):
+                    st.write("**Cancellation Dates:**", ", ".join(file_data['cancellation_dates']))
+                    
+            with col2:
+                if file_data.get('sale_dates'):
+                    st.write("**Sale Dates:**", ", ".join(file_data['sale_dates']))
+                if file_data.get('customer_names'):
+                    st.write("**Customer Names:**", ", ".join(file_data['customer_names']))
+                if file_data.get('mileages'):
+                    st.write("**Mileages:**", ", ".join(file_data['mileages']))
+                if file_data.get('refund_addresses'):
+                    st.write("**Refund Addresses:**", ", ".join(file_data['refund_addresses']))
+        
+        st.divider()
+    
     def parse_date(self, date_str):
         """Parse date string in various formats"""
         formats = ['%m/%d/%Y', '%m-%d-%Y', '%m/%d/%y', '%m-%d-%y']
@@ -708,14 +821,23 @@ class CancellationProcessor:
         result['Contract (canonical)'] = contract_value
         result['Contract Number'] = contract_value  # Set the contract number for display
         
+        # Check if any files are handwritten
+        has_handwritten = any(file_data.get('is_handwritten', False) for file_data in files)
+        
         # Reason evaluation with handwritten document filtering
-        filtered_reasons = self.filter_handwritten_reasons(all_reasons)
-        reason_status, reason_value = self.reconcile_values(filtered_reasons)
-        result['Reason Match across all forms'] = reason_status
-        if reason_value:
-            result['Reason (canonical)'] = '; '.join([self.normalize_reason(r) for r in reason_value.split('; ')])
+        if has_handwritten:
+            # For handwritten documents, flag for manual review
+            result['Reason Match across all forms'] = 'MANUAL_REVIEW_NEEDED'
+            result['Reason (canonical)'] = 'HANDWRITTEN - Manual Review Required'
+            result['Handwritten Files'] = [f['filename'] for f in files if f.get('is_handwritten', False)]
         else:
-            result['Reason (canonical)'] = reason_value
+            filtered_reasons = self.filter_handwritten_reasons(all_reasons)
+            reason_status, reason_value = self.reconcile_values(filtered_reasons)
+            result['Reason Match across all forms'] = reason_status
+            if reason_value:
+                result['Reason (canonical)'] = '; '.join([self.normalize_reason(r) for r in reason_value.split('; ')])
+            else:
+                result['Reason (canonical)'] = reason_value
         
         # Cancellation date evaluation with lender letter preference
         cxl_status, cxl_value = self.choose_cxl_date_with_lender_preference(files, all_cancellation_dates)
@@ -1027,10 +1149,17 @@ def main():
                             
                             # Reason Match
                             reason_status = result.get('Reason Match across all forms', 'INFO')
-                            reason_color = "🟢" if reason_status == "PASS" else "🔴" if reason_status == "FAIL" else "🟡"
-                            st.markdown(f"{reason_color} Reason Match across all forms: {reason_status}")
-                            if result.get('Reason (canonical)'):
+                            if reason_status == 'MANUAL_REVIEW_NEEDED':
+                                reason_color = "🟡"
+                                st.markdown(f"{reason_color} Reason Match across all forms: MANUAL REVIEW NEEDED")
                                 st.markdown(f"   └─ Reason: {result.get('Reason (canonical)')}")
+                                if result.get('Handwritten Files'):
+                                    st.markdown(f"   └─ Handwritten Files: {', '.join(result['Handwritten Files'])}")
+                            else:
+                                reason_color = "🟢" if reason_status == "PASS" else "🔴" if reason_status == "FAIL" else "🟡"
+                                st.markdown(f"{reason_color} Reason Match across all forms: {reason_status}")
+                                if result.get('Reason (canonical)'):
+                                    st.markdown(f"   └─ Reason: {result.get('Reason (canonical)')}")
                             
                             # Date Match
                             date_status = result.get('Cancellation date match across all forms. (Favor lender letter if applicable)', 'INFO')
@@ -1199,6 +1328,18 @@ def main():
                             
                             if result.get('Mileage values found'):
                                 st.write(f"• Mileage: {result.get('Mileage values found', 'N/A')}")
+                    
+                    # Add file viewing section
+                    st.subheader("📁 File Viewer - Manual Review")
+                    st.markdown("Click on any file below to view its content and extracted data for manual review.")
+                    
+                    # Create tabs for each file
+                    if processor.files_data:
+                        file_tabs = st.tabs([f"📄 {file_data['filename']}" for file_data in processor.files_data])
+                        
+                        for i, (file_data, tab) in enumerate(zip(processor.files_data, file_tabs)):
+                            with tab:
+                                processor.display_file_content(file_data, temp_dir)
                 
                 else:
                     st.warning("No valid files found in the ZIP archive.")
