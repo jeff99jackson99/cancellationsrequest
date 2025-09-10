@@ -184,22 +184,31 @@ class PreciseTextProcessor:
                 print("OpenAI API key not found, using regex extraction")
                 return self.extract_data_from_text("", filename)
             
-            # Convert PDF to images for AI vision analysis
-            import pdf2image
-            from PIL import Image
+            # Use PyMuPDF to convert PDF to images for AI vision analysis
+            import fitz  # PyMuPDF
             import base64
             import io
+            from PIL import Image
             
-            # Convert PDF to images
-            images = pdf2image.convert_from_path(file_path, dpi=200)
+            # Open PDF with PyMuPDF
+            doc = fitz.open(file_path)
+            images = []
+            
+            # Convert each page to image
+            for page_num in range(len(doc)):
+                page = doc.load_page(page_num)
+                # Render page to image (pixmap)
+                pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))  # 2x zoom for better quality
+                img_data = pix.tobytes("png")
+                images.append(img_data)
+            
+            doc.close()
             
             # Prepare images for AI analysis
             image_data = []
-            for i, image in enumerate(images):
-                # Convert PIL image to base64
-                buffered = io.BytesIO()
-                image.save(buffered, format="PNG")
-                img_base64 = base64.b64encode(buffered.getvalue()).decode()
+            for i, img_data in enumerate(images):
+                # Convert to base64
+                img_base64 = base64.b64encode(img_data).decode()
                 image_data.append({
                     "type": "image_url",
                     "image_url": {
@@ -311,7 +320,8 @@ class PreciseTextProcessor:
                     for page in pdf.pages:
                         text += page.extract_text() or ""
                 return self.extract_data_from_text(text, filename)
-            except:
+            except Exception as e2:
+                print(f"Text extraction fallback also failed: {e2}")
                 return {
                     'vin': [], 'contract_number': [], 'customer_name': [], 'cancellation_date': [],
                     'sale_date': [], 'contract_date': [], 'reason': [], 'mileage': [],
