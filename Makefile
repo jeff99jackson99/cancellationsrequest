@@ -19,11 +19,11 @@ setup:
 	@echo "Setup complete! Activate with: source .venv/bin/activate"
 
 dev:
-	streamlit run app.py
+	streamlit run src/app.py
 
 test: test-deps
 	@echo "Running installation test..."
-	python test_installation.py
+	python tests/test_installation.py
 
 clean:
 	rm -rf .venv
