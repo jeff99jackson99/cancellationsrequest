@@ -335,10 +335,10 @@ class ScreenshotProcessor:
             processed_image = self.preprocess_image(image)
             
             # Extract text using OCR with settings optimized for handwritten text
-            text = pytesseract.image_to_string(processed_image, config='--psm 6 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,;:()[]{}"/- ')
+            text = pytesseract.image_to_string(processed_image, config='--psm 6 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,;:()[]{}\"/- ')
             
             # Also try with different OCR settings for handwritten text
-            text_alt = pytesseract.image_to_string(image, config='--psm 3 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,;:()[]{}"/- ')
+            text_alt = pytesseract.image_to_string(image, config='--psm 3 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,;:()[]{}\"/- ')
             
             # Combine both results
             combined_text = text + "\n" + text_alt
@@ -433,7 +433,7 @@ class CancellationProcessor:
                 else:
                     try:
                         image = Image.open(file_path)
-                        text = pytesseract.image_to_string(image, config='--psm 6 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,;:()[]{}"/- ')
+                        text = pytesseract.image_to_string(image, config='--psm 6 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,;:()[]{}\"/- ')
                     except Exception as e:
                         st.warning(f"OCR failed for {file_path}: {e}")
             elif file_ext == '.txt':
@@ -449,7 +449,7 @@ class CancellationProcessor:
         try:
             image = Image.open(file_path)
             # Quick OCR to check for bucket-related keywords
-            text = pytesseract.image_to_string(image, config='--psm 6 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,;:()[]{}"/- ')
+            text = pytesseract.image_to_string(image, config='--psm 6 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,;:()[]{}\"/- ')
             bucket_keywords = ['ncb', 'bucket', 'fee', 'agent', 'dealer', 'chargeback', 'pcmi']
             return any(keyword in text.lower() for keyword in bucket_keywords)
         except:
@@ -1434,6 +1434,9 @@ class CancellationProcessor:
                 result = self.evaluate_packet(packet_key, files)
                 results.append(result)
             
+            # Display thumbnails before temp_dir is cleaned up
+            self.display_file_thumbnails(self.files_data, temp_dir)
+            
             return results
 
 # Main app
@@ -1898,8 +1901,7 @@ def main():
                                 elif mileage_status == "PASS":
                                     st.write(f"  └─ All mileages match")
                     
-                    # Add file thumbnail viewing section
-                    processor.display_file_thumbnails(processor.files_data, temp_dir)
+                    # File thumbnails are displayed in process_zip method
                 
                 else:
                     st.warning("No valid files found in the ZIP archive.")
