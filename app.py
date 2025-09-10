@@ -254,6 +254,9 @@ class PreciseTextProcessor:
             10. Reason: Cancellation reason (look for "Reason:", "Cancellation Reason:", "Why:")
             11. Contract Type: Special contract types (look for "Autohouse", "Friends & Family", "Diversicare", "Employee", "Staff", "Dealer Out of Business")
             12. Dealer Status: Business status (look for "Out of Business", "Closed", "Active", "Operating")
+            13. Autohouse Contract: Check if this is an Autohouse contract (look for "Autohouse", "Auto House", "AutoHouse")
+            14. Customer Direct Cancellation: Check if this is a customer direct cancellation (Dealer Out of Business or Friends & Family contract)
+            15. Diversicare Contract: Check if this is a Diversicare contract (look for "Diversicare", "DiversiCare", "Diversi Care")
 
             CRITICAL RULES:
             - Only extract data that is CLEARLY LABELED
@@ -287,7 +290,10 @@ class PreciseTextProcessor:
                 "no_chargeback": "YES_NO_OR_NULL",
                 "reason": "REASON_FOUND_OR_NULL",
                 "contract_type": "AUTOHOUSE_OR_FRIENDS_FAMILY_OR_DIVERSICARE_OR_NULL",
-                "dealer_status": "OUT_OF_BUSINESS_OR_ACTIVE_OR_NULL"
+                "dealer_status": "OUT_OF_BUSINESS_OR_ACTIVE_OR_NULL",
+                "autohouse_contract": "YES_NO_OR_NULL",
+                "customer_direct_cancellation": "YES_NO_OR_NULL",
+                "diversicare_contract": "YES_NO_OR_NULL"
             }}
             """
             
@@ -341,7 +347,10 @@ class PreciseTextProcessor:
                 'dealer_ncb': [ai_data.get('dealer_ncb')] if ai_data.get('dealer_ncb') and ai_data.get('dealer_ncb') != 'null' else [],
                 'no_chargeback': [ai_data.get('no_chargeback')] if ai_data.get('no_chargeback') and ai_data.get('no_chargeback') != 'null' else [],
                 'contract_type': [ai_data.get('contract_type')] if ai_data.get('contract_type') and ai_data.get('contract_type') != 'null' else [],
-                'dealer_status': [ai_data.get('dealer_status')] if ai_data.get('dealer_status') and ai_data.get('dealer_status') != 'null' else []
+                'dealer_status': [ai_data.get('dealer_status')] if ai_data.get('dealer_status') and ai_data.get('dealer_status') != 'null' else [],
+                'autohouse_contract': [ai_data.get('autohouse_contract')] if ai_data.get('autohouse_contract') and ai_data.get('autohouse_contract') != 'null' else [],
+                'customer_direct_cancellation': [ai_data.get('customer_direct_cancellation')] if ai_data.get('customer_direct_cancellation') and ai_data.get('customer_direct_cancellation') != 'null' else [],
+                'diversicare_contract': [ai_data.get('diversicare_contract')] if ai_data.get('diversicare_contract') and ai_data.get('diversicare_contract') != 'null' else []
             }
             
             # Remove empty values
@@ -378,7 +387,10 @@ class PreciseTextProcessor:
             'dealer_ncb': [],
             'no_chargeback': [],
             'contract_type': [],
-            'dealer_status': []
+            'dealer_status': [],
+            'autohouse_contract': [],
+            'customer_direct_cancellation': [],
+            'diversicare_contract': []
         }
         
         # Clean and structure the text
@@ -651,6 +663,58 @@ class PreciseTextProcessor:
         
         data['dealer_status'] = list(set(dealer_statuses))
         
+        # Autohouse Contract detection
+        autohouse_patterns = [
+            r'\b(Autohouse|Auto\s*House|AutoHouse)\b',
+            r'\b(Is this an Autohouse Contract)\b'
+        ]
+        
+        autohouse_contracts = []
+        for pattern in autohouse_patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            for match in matches:
+                if 'is this an autohouse contract' in match.lower():
+                    autohouse_contracts.append('Yes')
+                else:
+                    autohouse_contracts.append('Yes')
+        
+        data['autohouse_contract'] = list(set(autohouse_contracts))
+        
+        # Customer Direct Cancellation detection (Dealer Out of Business or Friends & Family)
+        customer_direct_patterns = [
+            r'\b(Dealer\s*Out\s*of\s*Business|Friends\s*&\s*Family|FF\s*contract)\b',
+            r'\b(Is this a customer direct cancellation)\b',
+            r'\b(customer\s*direct\s*cancellation)\b'
+        ]
+        
+        customer_direct_cancellations = []
+        for pattern in customer_direct_patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            for match in matches:
+                if 'is this a customer direct cancellation' in match.lower():
+                    customer_direct_cancellations.append('Yes')
+                elif 'dealer out of business' in match.lower() or 'friends' in match.lower():
+                    customer_direct_cancellations.append('Yes')
+        
+        data['customer_direct_cancellation'] = list(set(customer_direct_cancellations))
+        
+        # Diversicare Contract detection
+        diversicare_patterns = [
+            r'\b(Diversicare|DiversiCare|Diversi\s*Care)\b',
+            r'\b(Is this a Diversicare contract)\b'
+        ]
+        
+        diversicare_contracts = []
+        for pattern in diversicare_patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            for match in matches:
+                if 'is this a diversicare contract' in match.lower():
+                    diversicare_contracts.append('Yes')
+                else:
+                    diversicare_contracts.append('Yes')
+        
+        data['diversicare_contract'] = list(set(diversicare_contracts))
+        
         return data
     
     def process_zip(self, zip_file):
@@ -668,7 +732,10 @@ class PreciseTextProcessor:
             'dealer_ncb': [],
             'no_chargeback': [],
             'contract_type': [],
-            'dealer_status': []
+            'dealer_status': [],
+            'autohouse_contract': [],
+            'customer_direct_cancellation': [],
+            'diversicare_contract': []
         }
         
         files_processed = []
@@ -947,6 +1014,27 @@ class PreciseTextProcessor:
         else:
             results['dealer_status'] = {'status': 'INFO', 'value': 'Not found', 'reason': 'No dealer status information found'}
         
+        # 14. Autohouse Contract - FAIL if found
+        all_autohouse = all_data['autohouse_contract']
+        if all_autohouse and 'Yes' in all_autohouse:
+            results['autohouse_contract'] = {'status': 'FAIL', 'value': 'Yes', 'reason': 'Autohouse contract detected - requires special handling'}
+        else:
+            results['autohouse_contract'] = {'status': 'PASS', 'value': 'No', 'reason': 'Not an Autohouse contract'}
+        
+        # 15. Customer Direct Cancellation - FAIL if found
+        all_customer_direct = all_data['customer_direct_cancellation']
+        if all_customer_direct and 'Yes' in all_customer_direct:
+            results['customer_direct_cancellation'] = {'status': 'FAIL', 'value': 'Yes', 'reason': 'Customer direct cancellation detected (Dealer Out of Business or FF contract) - requires special handling'}
+        else:
+            results['customer_direct_cancellation'] = {'status': 'PASS', 'value': 'No', 'reason': 'Not a customer direct cancellation'}
+        
+        # 16. Diversicare Contract - FAIL if found
+        all_diversicare = all_data['diversicare_contract']
+        if all_diversicare and 'Yes' in all_diversicare:
+            results['diversicare_contract'] = {'status': 'FAIL', 'value': 'Yes', 'reason': 'Diversicare contract detected - requires special handling'}
+        else:
+            results['diversicare_contract'] = {'status': 'PASS', 'value': 'No', 'reason': 'Not a Diversicare contract'}
+        
         return results
     
     def parse_date(self, date_str):
@@ -1044,11 +1132,13 @@ def main():
             st.metric("Files Processed", len(files_processed))
         
         # Additional metrics for new fields
-        col5, col6 = st.columns(2)
+        col5, col6, col7 = st.columns(3)
         with col5:
             st.metric("Contract Types Found", len(all_data['contract_type']))
         with col6:
             st.metric("Dealer Status Found", len(all_data['dealer_status']))
+        with col7:
+            st.metric("Special Contracts", len([x for x in all_data['autohouse_contract'] + all_data['customer_direct_cancellation'] + all_data['diversicare_contract'] if x]))
         
         # QC Checklist Results
         st.subheader("📋 QC Checklist Results")
