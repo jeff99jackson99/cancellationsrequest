@@ -688,6 +688,17 @@ class CancellationProcessor:
         
         fields['sale_dates'] = list(set(sale_dates))
         
+        # Debug output for all extracted data
+        print(f"Extraction summary for {file_path}:")
+        print(f"  VINs: {len(fields['vins'])} - {fields['vins']}")
+        print(f"  Contracts: {len(fields['contracts'])} - {fields['contracts']}")
+        print(f"  Reasons: {len(fields['reasons'])} - {fields['reasons']}")
+        print(f"  Cancellation Dates: {len(fields['cancellation_dates'])} - {fields['cancellation_dates']}")
+        print(f"  Sale Dates: {len(fields['sale_dates'])} - {fields['sale_dates']}")
+        print(f"  Mileages: {len(fields['mileages'])} - {fields['mileages']}")
+        print(f"  Customer Names: {len(fields['customer_names'])} - {fields['customer_names']}")
+        print(f"  Addresses: {len(fields['refund_addresses'])} - {fields['refund_addresses']}")
+        
         # Refund address extraction - more comprehensive patterns
         address_patterns = [
             r'(?:remit|send|mail)\s+(?:refund|check)\s+to[: ]\s*(.+?)(?:\n|$)',
@@ -707,9 +718,36 @@ class CancellationProcessor:
         
         fields['refund_addresses'] = list(set(addresses))
         
-        # Mileage extraction
-        mileage_pattern = r'(?:mileage|odom(?:eter)?)\s*[:#]?\s*([0-9]{1,6}(?:,[0-9]{3})?)'
-        fields['mileages'] = re.findall(mileage_pattern, text, re.IGNORECASE)
+        # Mileage extraction - enhanced patterns
+        mileage_patterns = [
+            r'(?:mileage|odom(?:eter)?)\s*[:#]?\s*([0-9]{1,6}(?:,[0-9]{3})?)',
+            r'(?:mileage|odom(?:eter)?)\s*[:#]?\s*([0-9,]+)',
+            r'(?:sale|effect)\s*odom[:\s]*([0-9,]+)',
+            r'odom[:\s]*([0-9,]+)',
+            r'mileage[:\s]*([0-9,]+)',
+            r'(\d{1,6}(?:,\d{3})*)\s*(?:miles?|mi\.?)',
+            r'(?:miles?|mi\.?)\s*[:#]?\s*([0-9,]+)',
+            r'(\d{4,6})',  # Catch 4-6 digit numbers that could be mileage
+        ]
+        
+        mileages = []
+        for pattern in mileage_patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            mileages.extend(matches)
+        
+        # Filter out obviously non-mileage numbers (too small or too large)
+        filtered_mileages = []
+        for mileage in mileages:
+            # Remove commas and convert to int
+            try:
+                mileage_num = int(mileage.replace(',', ''))
+                # Reasonable mileage range: 0 to 999,999
+                if 0 <= mileage_num <= 999999:
+                    filtered_mileages.append(mileage)
+            except ValueError:
+                continue
+        
+        fields['mileages'] = list(set(filtered_mileages))
         
         # Customer name extraction
         customer_patterns = [
@@ -1896,25 +1934,37 @@ def main():
                     
                     # Show extraction summary
                     st.subheader("📊 Data Extraction Summary")
+                    
+                    # Count raw extracted data from all files
                     total_vins = sum(len(f.get('vins', [])) for f in processor.files_data)
                     total_contracts = sum(len(f.get('contracts', [])) for f in processor.files_data)
                     total_reasons = sum(len(f.get('reasons', [])) for f in processor.files_data)
-                    total_dates = sum(len(f.get('cancellation_dates', [])) for f in processor.files_data)
+                    total_cxl_dates = sum(len(f.get('cancellation_dates', [])) for f in processor.files_data)
+                    total_sale_dates = sum(len(f.get('sale_dates', [])) for f in processor.files_data)
                     total_addresses = sum(len(f.get('refund_addresses', [])) for f in processor.files_data)
                     total_mileages = sum(len(f.get('mileages', [])) for f in processor.files_data)
                     total_customers = sum(len(f.get('customer_names', [])) for f in processor.files_data)
                     
+                    # Also count from processed results
+                    unique_vins = len(set([r.get('VIN (canonical)', '') for r in results if r.get('VIN (canonical)', '').strip()]))
+                    unique_contracts = len(set([r.get('Contract (canonical)', '') for r in results if r.get('Contract (canonical)', '').strip()]))
+                    unique_reasons = len(set([r.get('Reason (canonical)', '') for r in results if r.get('Reason (canonical)', '').strip()]))
+                    unique_cxl_dates = len(set([r.get('Cancellation Effective Date', '') for r in results if r.get('Cancellation Effective Date', '').strip()]))
+                    unique_sale_dates = len(set([r.get('Sale Date', '') for r in results if r.get('Sale Date', '').strip()]))
+                    unique_mileages = len(set([r.get('Mileage values found', '') for r in results if r.get('Mileage values found', '').strip()]))
+                    
                     col1, col2, col3, col4 = st.columns(4)
                     with col1:
-                        st.metric("VINs Found", total_vins)
-                        st.metric("Contracts Found", total_contracts)
+                        st.metric("VINs Found", f"{total_vins} ({unique_vins} unique)")
+                        st.metric("Contracts Found", f"{total_contracts} ({unique_contracts} unique)")
                     with col2:
-                        st.metric("Reasons Found", total_reasons)
-                        st.metric("Dates Found", total_dates)
+                        st.metric("Reasons Found", f"{total_reasons} ({unique_reasons} unique)")
+                        st.metric("Cancellation Dates", f"{total_cxl_dates} ({unique_cxl_dates} unique)")
                     with col3:
-                        st.metric("Addresses Found", total_addresses)
-                        st.metric("Mileages Found", total_mileages)
+                        st.metric("Sale Dates Found", f"{total_sale_dates} ({unique_sale_dates} unique)")
+                        st.metric("Mileages Found", f"{total_mileages} ({unique_mileages} unique)")
                     with col4:
+                        st.metric("Addresses Found", total_addresses)
                         st.metric("Customer Names", total_customers)
                         st.metric("Files Processed", len(processor.files_data))
                     
