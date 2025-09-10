@@ -339,24 +339,24 @@ class CancellationProcessor:
                     fields['customer_names'].append(name)
         
         # Flag detection with comprehensive patterns
-        # Agent NCB patterns
+        # Agent NCB patterns - NCB means No Chargeback (agent is NOT charged back)
         agent_ncb_patterns = [
             r'Agent\s+NCB',
             r'No\s*Chargeback.*Agent',
             r'Agent.*No\s*Chargeback',
-            r'Agent\s+Fee',
             r'Agent.*NCB'
         ]
+        # Note: Agent NCB = Agent No Chargeback (agent is NOT charged back)
         fields['has_agent_ncb'] = any(re.search(pattern, text, re.IGNORECASE) for pattern in agent_ncb_patterns)
         
-        # Dealer NCB patterns
+        # Dealer NCB patterns - NCB means No Chargeback (dealer is NOT charged back)
         dealer_ncb_patterns = [
             r'Dealer\s+NCB',
             r'No\s*Chargeback.*Dealer',
             r'Dealer.*No\s*Chargeback',
-            r'Dealer\s+Fee',
             r'Dealer.*NCB'
         ]
+        # Note: Dealer NCB = Dealer No Chargeback (dealer is NOT charged back)
         fields['has_dealer_ncb'] = any(re.search(pattern, text, re.IGNORECASE) for pattern in dealer_ncb_patterns)
         
         # Autohouse patterns
@@ -675,16 +675,16 @@ class CancellationProcessor:
         else:
             result['Is the cancellation effective date past 90 days from contract sale date?'] = 'Unknown'
         
-        # Enhanced NCB flags with amounts
+        # Enhanced NCB flags with amounts (NCB = No Chargeback)
         if agent_ncb_amounts:
-            result['Is there an Agent NCB Fee?'] = f'Yes (${sum(agent_ncb_amounts):.2f})' if sum(agent_ncb_amounts) > 0 else 'No'
+            result['Is there an Agent NCB Fee?'] = f'Yes - No Chargeback (${sum(agent_ncb_amounts):.2f})' if sum(agent_ncb_amounts) > 0 else 'No'
         else:
-            result['Is there an Agent NCB Fee?'] = 'Yes' if has_agent_ncb else 'No'
+            result['Is there an Agent NCB Fee?'] = 'Yes - No Chargeback' if has_agent_ncb else 'No'
             
         if dealer_ncb_amounts:
-            result['Is there a Dealer NCB Fee?'] = f'Yes (${sum(dealer_ncb_amounts):.2f})' if sum(dealer_ncb_amounts) > 0 else 'No'
+            result['Is there a Dealer NCB Fee?'] = f'Yes - No Chargeback (${sum(dealer_ncb_amounts):.2f})' if sum(dealer_ncb_amounts) > 0 else 'No'
         else:
-            result['Is there a Dealer NCB Fee?'] = 'Yes' if has_dealer_ncb else 'No'
+            result['Is there a Dealer NCB Fee?'] = 'Yes - No Chargeback' if has_dealer_ncb else 'No'
         
         # Refund address
         if is_lender_letter and all_refund_addresses:
@@ -986,15 +986,15 @@ def main():
                             if result.get('Sale Date'):
                                 st.markdown(f"   └─ Sale Date: {result.get('Sale Date')}")
                             
-                            # Agent NCB
+                            # Agent NCB (No Chargeback)
                             agent_ncb = result.get('Is there an Agent NCB Fee?', 'No')
                             agent_color = "🟢" if "Yes" in agent_ncb else "🔴" if "No" in agent_ncb else "🟡"
-                            st.markdown(f"{agent_color} Agent NCB: {agent_ncb}")
+                            st.markdown(f"{agent_color} Agent NCB (No Chargeback): {agent_ncb}")
                             
-                            # Dealer NCB
+                            # Dealer NCB (No Chargeback)
                             dealer_ncb = result.get('Is there a Dealer NCB Fee?', 'No')
                             dealer_color = "🟢" if "Yes" in dealer_ncb else "🔴" if "No" in dealer_ncb else "🟡"
-                            st.markdown(f"{dealer_color} Dealer NCB: {dealer_ncb}")
+                            st.markdown(f"{dealer_color} Dealer NCB (No Chargeback): {dealer_ncb}")
                             
                             # Refund Address
                             refund_status = result.get('Is there a different address to send the refund? (only applicable if the request included a lender letter addressed to Ascent)', 'No')
