@@ -1088,7 +1088,7 @@ class CancellationProcessor:
             print(f"Error detecting signature in {image_path}: {e}")
             return "none", None
     
-    def create_thumbnail(self, file_data, temp_dir, size=(200, 150)):
+    def create_thumbnail(self, file_data, temp_dir, size=(400, 300)):
         """Create a thumbnail for file display"""
         filename = file_data['filename']
         file_path = os.path.join(temp_dir, filename)
@@ -1102,21 +1102,27 @@ class CancellationProcessor:
                 # For images, create a thumbnail
                 image = Image.open(file_path)
                 image.thumbnail(size, Image.Resampling.LANCZOS)
+                # Save thumbnail to file
+                thumbnail_path = os.path.join(temp_dir, f"thumb_{filename}.png")
+                image.save(thumbnail_path, "PNG")
                 print(f"Created image thumbnail for {filename}")
-                return image
+                return thumbnail_path
             elif file_ext == '.pdf':
                 # For PDFs, convert first page to image if pdf2image is available
                 if PDF2IMAGE_AVAILABLE:
                     try:
                         # Convert PDF to image (first page only) with higher DPI for better quality
-                        images = convert_from_path(file_path, first_page=1, last_page=1, dpi=300)
+                        images = convert_from_path(file_path, first_page=1, last_page=1, dpi=600)
                         if images:
                             # Get the first page image
                             pdf_image = images[0]
                             # Create thumbnail
                             pdf_image.thumbnail(size, Image.Resampling.LANCZOS)
+                            # Save thumbnail to file
+                            thumbnail_path = os.path.join(temp_dir, f"thumb_{filename}.png")
+                            pdf_image.save(thumbnail_path, "PNG")
                             print(f"Created PDF thumbnail for {filename}")
-                            return pdf_image
+                            return thumbnail_path
                     except Exception as e:
                         print(f"PDF conversion failed for {filename}: {e}")
                 
@@ -1130,8 +1136,11 @@ class CancellationProcessor:
                     font = None
                 draw.text((10, 10), "PDF", fill='red', font=font)
                 draw.text((10, 30), filename[:20], fill='black', font=font)
+                # Save thumbnail to file
+                thumbnail_path = os.path.join(temp_dir, f"thumb_{filename}.png")
+                img.save(thumbnail_path, "PNG")
                 print(f"Created PDF fallback icon for {filename}")
-                return img
+                return thumbnail_path
             elif file_ext in ['.docx', '.doc']:
                 # For Word docs, create a simple icon
                 from PIL import ImageDraw, ImageFont
@@ -1143,8 +1152,11 @@ class CancellationProcessor:
                     font = None
                 draw.text((10, 10), "DOC", fill='blue', font=font)
                 draw.text((10, 30), filename[:20], fill='black', font=font)
+                # Save thumbnail to file
+                thumbnail_path = os.path.join(temp_dir, f"thumb_{filename}.png")
+                img.save(thumbnail_path, "PNG")
                 print(f"Created DOC thumbnail for {filename}")
-                return img
+                return thumbnail_path
             elif file_ext == '.txt':
                 # For text files, create a simple icon
                 from PIL import ImageDraw, ImageFont
@@ -1156,8 +1168,11 @@ class CancellationProcessor:
                     font = None
                 draw.text((10, 10), "TXT", fill='green', font=font)
                 draw.text((10, 30), filename[:20], fill='black', font=font)
+                # Save thumbnail to file
+                thumbnail_path = os.path.join(temp_dir, f"thumb_{filename}.png")
+                img.save(thumbnail_path, "PNG")
                 print(f"Created TXT thumbnail for {filename}")
-                return img
+                return thumbnail_path
             else:
                 # Default icon for unknown file types
                 from PIL import ImageDraw, ImageFont
@@ -1199,8 +1214,8 @@ class CancellationProcessor:
                 # For PDFs, convert to high-res image
                 if PDF2IMAGE_AVAILABLE:
                     try:
-                        # Convert PDF to high-res image
-                        images = convert_from_path(file_path, first_page=1, last_page=1, dpi=600)
+                        # Convert PDF to high-res image with maximum quality
+                        images = convert_from_path(file_path, first_page=1, last_page=1, dpi=1200)
                         if images:
                             return images[0]
                     except Exception as e:
@@ -1242,14 +1257,26 @@ class CancellationProcessor:
                             st.image(thumbnail, caption=filename, use_container_width=True)
                             
                             # Add click-to-expand functionality
-                            if st.button(f"🔍 Expand {filename}", key=f"expand_{i}_{j}"):
+                            expand_key = f"expand_{i}_{j}_{filename.replace('.', '_')}"
+                            if st.button(f"🔍 Expand {filename}", key=expand_key):
+                                # Store the filename to expand in session state
+                                st.session_state[f'expand_{filename}'] = True
+                            
+                            # Check if this file should be expanded
+                            if st.session_state.get(f'expand_{filename}', False):
                                 # Create high-res version for expansion
                                 high_res = self.create_high_res_image(file_data, temp_dir)
                                 if high_res:
                                     st.subheader(f"🔍 {filename} - Full Resolution")
                                     st.image(high_res, use_container_width=True)
+                                    if st.button(f"❌ Close {filename}", key=f"close_{expand_key}"):
+                                        st.session_state[f'expand_{filename}'] = False
+                                        st.rerun()
                                 else:
                                     st.warning(f"Could not create high-resolution version of {filename}")
+                                    if st.button(f"❌ Close {filename}", key=f"close_{expand_key}"):
+                                        st.session_state[f'expand_{filename}'] = False
+                                        st.rerun()
                         else:
                             st.write("📄 No thumbnail available")
                         
@@ -1788,6 +1815,36 @@ class CancellationProcessor:
                 if 'Days Difference' in result:
                     break
             
+            # If still no sale dates found, try using contract dates as fallback
+            if 'Days Difference' not in result and cxl_date:
+                # Look for contract dates in the text
+                all_contract_dates = []
+                for f in files:
+                    if f.get('raw_text'):
+                        # Look for contract date patterns
+                        contract_date_patterns = [
+                            r'contract\s*date[:\s]*(\d{1,2}/\d{1,2}/\d{2,4})',
+                            r'date\s+of\s+contract[:\s]*(\d{1,2}/\d{1,2}/\d{2,4})',
+                            r'contract\s+date[:\s]*(\d{1,2}/\d{1,2}/\d{2,4})',
+                            r'contract[:\s]*(\d{1,2}/\d{1,2}/\d{2,4})',
+                        ]
+                        for pattern in contract_date_patterns:
+                            matches = re.findall(pattern, f['raw_text'], re.IGNORECASE)
+                            all_contract_dates.extend(matches)
+                
+                print(f"Debug - Found {len(all_contract_dates)} contract dates: {all_contract_dates}")
+                
+                # Try using contract dates as sale date fallback
+                for contract_date_str in all_contract_dates:
+                    contract_date = self.parse_date(contract_date_str)
+                    if contract_date and cxl_date:
+                        days_diff = (cxl_date - contract_date).days
+                        result['Is the cancellation effective date past 90 days from contract sale date?'] = 'Yes' if days_diff > 90 else 'No'
+                        result['Days Difference'] = f"{days_diff} days (using contract date)"
+                        result['Sale Date'] = f"{contract_date_str} (contract date)"
+                        print(f"Debug - Successfully calculated {days_diff} days between contract date {contract_date_str} and cancellation {cxl_date_str}")
+                        break
+            
             # If still no valid dates, check if we have a future cancellation date
             if 'Days Difference' not in result and cxl_date:
                 current_date = datetime.now()
@@ -1795,7 +1852,7 @@ class CancellationProcessor:
                     result['Is the cancellation effective date past 90 days from contract sale date?'] = 'Future Date - Cannot Calculate'
                     result['Days Difference'] = f"Future date: {cxl_date.strftime('%m/%d/%Y')}"
                 else:
-                    result['Is the cancellation effective date past 90 days from contract sale date?'] = 'Unknown - No sale date found'
+                    result['Is the cancellation effective date past 90 days from contract sale date?'] = 'Unknown - No sale or contract date found'
                     result['Days Difference'] = 'N/A'
             elif 'Days Difference' not in result:
                 result['Is the cancellation effective date past 90 days from contract sale date?'] = 'Unknown - No valid dates found'
@@ -1891,7 +1948,7 @@ class CancellationProcessor:
                         print(f"Debug - No calculations found in {file_data.get('filename', 'unknown')}")
         
         result['Refund Calculation Status'] = calculation_status
-        result['Refund Calculation Issues'] = '; '.join(calculation_issues) if calculation_issues else ''
+        result['Refund Calculation Issues'] = ' | '.join(calculation_issues) if calculation_issues else ''
         result['Refund Calculation Details'] = calculation_details
         
         # Mileage - show all detected mileages with normalized comparison
@@ -2408,7 +2465,12 @@ def main():
                             st.markdown(f"{calc_color} Refund Calculations: {calc_status}")
                             
                             if result.get('Refund Calculation Issues'):
-                                st.markdown(f"   └─ Issues: {result.get('Refund Calculation Issues')}")
+                                issues = result.get('Refund Calculation Issues', '')
+                                if issues:
+                                    st.markdown("   └─ Issues:")
+                                    for issue in issues.split(' | '):
+                                        if issue.strip():
+                                            st.markdown(f"      • {issue.strip()}")
                             
                             # Show calculation details
                             calc_details = result.get('Refund Calculation Details', {})
