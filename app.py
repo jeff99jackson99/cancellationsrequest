@@ -361,6 +361,10 @@ class ScreenshotProcessor:
                 'raw_text': combined_text
             }
             
+            # Debug output for NCB extraction
+            print(f"NCB extraction from {image_path}:")
+            print(f"  Text sample: {combined_text[:300]}...")
+            
             # Extract Agent NCB
             for pattern in self.ncb_patterns['agent_ncb']:
                 matches = re.findall(pattern, combined_text, re.IGNORECASE)
@@ -395,6 +399,13 @@ class ScreenshotProcessor:
                         break
                     except ValueError:
                         continue
+            
+            # Debug output for results
+            print(f"  Agent NCB: {ncb_data['agent_ncb_amount']}")
+            print(f"  Dealer NCB: {ncb_data['dealer_ncb_amount']}")
+            print(f"  Total: {ncb_data['total_amount']}")
+            print(f"  Has Agent NCB: {ncb_data['has_agent_ncb']}")
+            print(f"  Has Dealer NCB: {ncb_data['has_dealer_ncb']}")
             
             return ncb_data
             
@@ -467,8 +478,37 @@ class CancellationProcessor:
             except Exception as ocr_error:
                 print(f"OCR failed in bucket detection for {file_path}: {ocr_error}")
                 return False
-            bucket_keywords = ['ncb', 'bucket', 'fee', 'agent', 'dealer', 'chargeback', 'pcmi']
-            return any(keyword in text.lower() for keyword in bucket_keywords)
+            
+            # Enhanced bucket detection keywords
+            bucket_keywords = [
+                'ncb', 'bucket', 'fee', 'agent', 'dealer', 'chargeback', 'pcmi',
+                'admin', 'reserve', 'commission', 'rate details', 'written', 'cancelled',
+                'balance', 'baseadmin', 'ncbagent', 'ncbdealer', 'agentcomm',
+                'subagent', 'basereserve', 'surcharge', 'total'
+            ]
+            
+            text_lower = text.lower()
+            keyword_matches = sum(1 for keyword in bucket_keywords if keyword in text_lower)
+            
+            # Also check for specific patterns that indicate PCMI screenshots
+            pcmi_patterns = [
+                'edit contract', 'contract number', 'sale date', 'effect date',
+                'rate type', 'net rate', 'admin total', 'reserves total',
+                'hampstead', 'preowned', 'odom', 'deal', 'billed date'
+            ]
+            
+            pattern_matches = sum(1 for pattern in pcmi_patterns if pattern in text_lower)
+            
+            # Debug output
+            print(f"Bucket detection for {file_path}:")
+            print(f"  Keywords found: {keyword_matches}")
+            print(f"  Patterns found: {pattern_matches}")
+            print(f"  Text sample: {text_lower[:200]}...")
+            
+            # Consider it a bucket screenshot if we have multiple keyword matches or PCMI patterns
+            is_bucket = keyword_matches >= 3 or pattern_matches >= 2
+            print(f"  Is bucket: {is_bucket}")
+            return is_bucket
         except Exception as e:
             print(f"Error in bucket detection for {file_path}: {e}")
             return False
@@ -1448,6 +1488,13 @@ class CancellationProcessor:
         # Set customer name
         if all_customer_names:
             result['Customer Name'] = all_customer_names[0]  # Take first one
+        
+        # Additional fields from JotForm structure
+        result['Contact Person'] = ''
+        result['Phone Number'] = ''
+        result['Email'] = ''
+        result['Selling Dealership'] = ''
+        result['Today\'s Date'] = ''
         
         # VIN evaluation
         vin_status, vin_value = self.reconcile_values(all_vins)
