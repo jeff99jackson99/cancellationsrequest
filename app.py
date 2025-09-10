@@ -4,6 +4,7 @@ import zipfile
 import tempfile
 import os
 import re
+import json
 from pathlib import Path
 from datetime import datetime, timedelta
 
@@ -251,6 +252,8 @@ class PreciseTextProcessor:
             8. Dealer NCB: Yes/No (look for "NCB:", "No Chargeback:", "Dealer NCB:", "Dealer Remitted Amount", "Cancel Fee")
             9. No Chargeback: Yes/No (look for "No Chargeback:", "Chargeback:", "Paid Ascent", "Dealer Profit Claim")
             10. Reason: Cancellation reason (look for "Reason:", "Cancellation Reason:", "Why:")
+            11. Contract Type: Special contract types (look for "Autohouse", "Friends & Family", "Diversicare", "Employee", "Staff", "Dealer Out of Business")
+            12. Dealer Status: Business status (look for "Out of Business", "Closed", "Active", "Operating")
 
             CRITICAL RULES:
             - Only extract data that is CLEARLY LABELED
@@ -282,7 +285,9 @@ class PreciseTextProcessor:
                 "total_refund": "REFUND_FOUND_OR_NULL",
                 "dealer_ncb": "YES_NO_OR_NULL",
                 "no_chargeback": "YES_NO_OR_NULL",
-                "reason": "REASON_FOUND_OR_NULL"
+                "reason": "REASON_FOUND_OR_NULL",
+                "contract_type": "AUTOHOUSE_OR_FRIENDS_FAMILY_OR_DIVERSICARE_OR_NULL",
+                "dealer_status": "OUT_OF_BUSINESS_OR_ACTIVE_OR_NULL"
             }}
             """
             
@@ -334,7 +339,9 @@ class PreciseTextProcessor:
                 'mileage': [ai_data.get('mileage')] if ai_data.get('mileage') and ai_data.get('mileage') != 'null' else [],
                 'total_refund': [ai_data.get('total_refund')] if ai_data.get('total_refund') and ai_data.get('total_refund') != 'null' else [],
                 'dealer_ncb': [ai_data.get('dealer_ncb')] if ai_data.get('dealer_ncb') and ai_data.get('dealer_ncb') != 'null' else [],
-                'no_chargeback': [ai_data.get('no_chargeback')] if ai_data.get('no_chargeback') and ai_data.get('no_chargeback') != 'null' else []
+                'no_chargeback': [ai_data.get('no_chargeback')] if ai_data.get('no_chargeback') and ai_data.get('no_chargeback') != 'null' else [],
+                'contract_type': [ai_data.get('contract_type')] if ai_data.get('contract_type') and ai_data.get('contract_type') != 'null' else [],
+                'dealer_status': [ai_data.get('dealer_status')] if ai_data.get('dealer_status') and ai_data.get('dealer_status') != 'null' else []
             }
             
             # Remove empty values
@@ -369,7 +376,9 @@ class PreciseTextProcessor:
             'mileage': [],
             'total_refund': [],
             'dealer_ncb': [],
-            'no_chargeback': []
+            'no_chargeback': [],
+            'contract_type': [],
+            'dealer_status': []
         }
         
         # Clean and structure the text
@@ -595,6 +604,53 @@ class PreciseTextProcessor:
         data['dealer_ncb'] = list(set(ncb_values))
         data['no_chargeback'] = list(set(chargeback_values))
         
+        # Contract type extraction - look for special contract types
+        contract_type_patterns = [
+            r'\b(Autohouse)\b',
+            r'\b(Friends\s*&\s*Family)\b',
+            r'\b(Diversicare)\b',
+            r'\b(Employee)\b',
+            r'\b(Staff)\b',
+            r'\b(Dealer\s*Out\s*of\s*Business)\b',
+            r'\b(Out\s*of\s*Business)\b'
+        ]
+        
+        contract_types = []
+        for pattern in contract_type_patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            for match in matches:
+                # Normalize the match
+                normalized = match.strip()
+                if 'friends' in normalized.lower() and 'family' in normalized.lower():
+                    normalized = 'Friends & Family'
+                elif 'out' in normalized.lower() and 'business' in normalized.lower():
+                    normalized = 'Dealer Out of Business'
+                contract_types.append(normalized)
+        
+        data['contract_type'] = list(set(contract_types))
+        
+        # Dealer status extraction - look for business status indicators
+        dealer_status_patterns = [
+            r'\b(Out\s*of\s*Business)\b',
+            r'\b(Closed)\b',
+            r'\b(Active)\b',
+            r'\b(Operating)\b',
+            r'\b(In\s*Business)\b'
+        ]
+        
+        dealer_statuses = []
+        for pattern in dealer_status_patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            for match in matches:
+                normalized = match.strip()
+                if 'out' in normalized.lower() and 'business' in normalized.lower():
+                    normalized = 'Out of Business'
+                elif 'in' in normalized.lower() and 'business' in normalized.lower():
+                    normalized = 'Active'
+                dealer_statuses.append(normalized)
+        
+        data['dealer_status'] = list(set(dealer_statuses))
+        
         return data
     
     def process_zip(self, zip_file):
@@ -610,7 +666,9 @@ class PreciseTextProcessor:
             'mileage': [],
             'total_refund': [],
             'dealer_ncb': [],
-            'no_chargeback': []
+            'no_chargeback': [],
+            'contract_type': [],
+            'dealer_status': []
         }
         
         files_processed = []
@@ -875,6 +933,20 @@ class PreciseTextProcessor:
         else:
             results['reasons'] = {'status': 'FAIL', 'value': 'Not found', 'reason': 'No cancellation reason found in any file'}
         
+        # 12. Contract Type - informational check
+        all_contract_types = all_data['contract_type']
+        if all_contract_types:
+            results['contract_type'] = {'status': 'INFO', 'value': f'Found: {", ".join(all_contract_types)}', 'reason': 'Special contract type detected'}
+        else:
+            results['contract_type'] = {'status': 'INFO', 'value': 'Not found', 'reason': 'No special contract type detected'}
+        
+        # 13. Dealer Status - informational check
+        all_dealer_status = all_data['dealer_status']
+        if all_dealer_status:
+            results['dealer_status'] = {'status': 'INFO', 'value': f'Found: {", ".join(all_dealer_status)}', 'reason': 'Dealer status information found'}
+        else:
+            results['dealer_status'] = {'status': 'INFO', 'value': 'Not found', 'reason': 'No dealer status information found'}
+        
         return results
     
     def parse_date(self, date_str):
@@ -971,6 +1043,13 @@ def main():
             st.metric("Mileages Found", len(all_data['mileage']))
             st.metric("Files Processed", len(files_processed))
         
+        # Additional metrics for new fields
+        col5, col6 = st.columns(2)
+        with col5:
+            st.metric("Contract Types Found", len(all_data['contract_type']))
+        with col6:
+            st.metric("Dealer Status Found", len(all_data['dealer_status']))
+        
         # QC Checklist Results
         st.subheader("📋 QC Checklist Results")
         
@@ -1035,6 +1114,120 @@ def main():
         # Display comparison table
         df_comparison = pd.DataFrame(comparison_data)
         st.dataframe(df_comparison, use_container_width=True)
+        
+        # Export and Print Options
+        st.subheader("📄 Export & Print Options")
+        
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            # Export QC Results as CSV
+            qc_df = pd.DataFrame(qc_data)
+            csv_data = qc_df.to_csv(index=False)
+            st.download_button(
+                label="📊 Download QC Results (CSV)",
+                data=csv_data,
+                file_name=f"qc_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv"
+            )
+        
+        with col2:
+            # Export QC Results as JSON
+            qc_json = {
+                'timestamp': datetime.now().isoformat(),
+                'files_processed': len(files_processed),
+                'qc_results': qc_results,
+                'extracted_data': all_data
+            }
+            json_data = json.dumps(qc_json, indent=2)
+            st.download_button(
+                label="📋 Download Full Report (JSON)",
+                data=json_data,
+                file_name=f"qc_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                mime="application/json"
+            )
+        
+        with col3:
+            # Print-friendly view
+            if st.button("🖨️ Show Print View"):
+                st.session_state.show_print_view = True
+        
+        # Print-friendly view
+        if st.session_state.get('show_print_view', False):
+            st.subheader("🖨️ Print-Friendly View")
+            
+            # Create a print-friendly version
+            print_html = f"""
+            <div style="font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto;">
+                <h1>QC Form Cancellations Report</h1>
+                <p><strong>Generated:</strong> {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
+                <p><strong>Files Processed:</strong> {len(files_processed)}</p>
+                
+                <h2>Data Extraction Summary</h2>
+                <table border="1" cellpadding="5" cellspacing="0" style="width: 100%; border-collapse: collapse;">
+                    <tr>
+                        <th>Field</th>
+                        <th>Count</th>
+                        <th>Values</th>
+                    </tr>
+                    <tr><td>VINs</td><td>{len(all_data['vin'])}</td><td>{', '.join(all_data['vin']) if all_data['vin'] else 'None'}</td></tr>
+                    <tr><td>Contract Numbers</td><td>{len(all_data['contract_number'])}</td><td>{', '.join(all_data['contract_number']) if all_data['contract_number'] else 'None'}</td></tr>
+                    <tr><td>Customer Names</td><td>{len(all_data['customer_name'])}</td><td>{', '.join(all_data['customer_name']) if all_data['customer_name'] else 'None'}</td></tr>
+                    <tr><td>Cancellation Dates</td><td>{len(all_data['cancellation_date'])}</td><td>{', '.join(all_data['cancellation_date']) if all_data['cancellation_date'] else 'None'}</td></tr>
+                    <tr><td>Sale Dates</td><td>{len(all_data['sale_date'])}</td><td>{', '.join(all_data['sale_date']) if all_data['sale_date'] else 'None'}</td></tr>
+                    <tr><td>Mileages</td><td>{len(all_data['mileage'])}</td><td>{', '.join(all_data['mileage']) if all_data['mileage'] else 'None'}</td></tr>
+                    <tr><td>Total Refunds</td><td>{len(all_data['total_refund'])}</td><td>{', '.join(all_data['total_refund']) if all_data['total_refund'] else 'None'}</td></tr>
+                    <tr><td>Contract Types</td><td>{len(all_data['contract_type'])}</td><td>{', '.join(all_data['contract_type']) if all_data['contract_type'] else 'None'}</td></tr>
+                    <tr><td>Dealer Status</td><td>{len(all_data['dealer_status'])}</td><td>{', '.join(all_data['dealer_status']) if all_data['dealer_status'] else 'None'}</td></tr>
+                </table>
+                
+                <h2>QC Checklist Results</h2>
+                <table border="1" cellpadding="5" cellspacing="0" style="width: 100%; border-collapse: collapse;">
+                    <tr>
+                        <th>Field</th>
+                        <th>Status</th>
+                        <th>Value</th>
+                        <th>Reason</th>
+                    </tr>
+            """
+            
+            for field, result in qc_results.items():
+                status_icon = {'PASS': '✅', 'FAIL': '❌', 'INFO': 'ℹ️'}
+                print_html += f"""
+                    <tr>
+                        <td>{field.replace('_', ' ').title()}</td>
+                        <td>{status_icon[result['status']]} {result['status']}</td>
+                        <td>{result['value']}</td>
+                        <td>{result['reason']}</td>
+                    </tr>
+                """
+            
+            print_html += """
+                </table>
+                
+                <h2>Files Processed</h2>
+                <ul>
+            """
+            
+            for file_data in files_processed:
+                print_html += f"<li>{file_data['filename']}</li>"
+            
+            print_html += """
+                </ul>
+            </div>
+            """
+            
+            st.markdown(print_html, unsafe_allow_html=True)
+            
+            # Add JavaScript for printing
+            st.markdown("""
+            <script>
+            function printPage() {
+                window.print();
+            }
+            </script>
+            <button onclick="printPage()" style="padding: 10px 20px; font-size: 16px; background-color: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer;">🖨️ Print This Page</button>
+            """, unsafe_allow_html=True)
         
         # Files section
         st.subheader("📁 Files - Click to Download")
