@@ -12,6 +12,8 @@ from docx import Document
 from PIL import Image
 import pytesseract
 import io
+import requests
+import ipaddress
 try:
     import cv2
     import numpy as np
@@ -35,6 +37,237 @@ st.markdown("Upload a ZIP file containing cancellation packet files to perform q
 # Check for OpenCV availability
 if not OPENCV_AVAILABLE:
     st.warning("⚠️ OpenCV is not available. Screenshot processing will use basic OCR without image preprocessing.")
+
+class IPSecurityChecker:
+    """IP address lookup and VPN detection for security validation"""
+    
+    def __init__(self):
+        self.vpn_indicators = [
+            'vpn', 'proxy', 'tor', 'anonymizer', 'privacy', 'secure',
+            'private', 'anonymous', 'hide', 'mask', 'shield', 'guard',
+            'express', 'nord', 'surfshark', 'cyberghost', 'windscribe',
+            'proton', 'mullvad', 'ivpn', 'perfect', 'privacy', 'tunnelbear'
+        ]
+        
+        self.known_vpn_providers = [
+            'nordvpn', 'expressvpn', 'surfshark', 'cyberghost', 'windscribe',
+            'protonvpn', 'mullvad', 'ivpn', 'perfect-privacy', 'tunnelbear',
+            'private internet access', 'pia', 'hotspot shield', 'zenmate',
+            'ipvanish', 'vyprvpn', 'hidemyass', 'hma', 'purevpn'
+        ]
+    
+    def get_client_ip(self):
+        """Get the client's IP address from Streamlit session"""
+        try:
+            # Try to get IP from Streamlit's session state
+            if hasattr(st, 'session_state') and 'client_ip' in st.session_state:
+                return st.session_state.client_ip
+            
+            # Fallback: try to get from request headers
+            import streamlit.web.server.server as server
+            if hasattr(server, 'get_current_request'):
+                request = server.get_current_request()
+                if request:
+                    # Check for forwarded IP first (common with proxies)
+                    forwarded_for = request.headers.get('X-Forwarded-For')
+                    if forwarded_for:
+                        return forwarded_for.split(',')[0].strip()
+                    
+                    # Check for real IP header
+                    real_ip = request.headers.get('X-Real-IP')
+                    if real_ip:
+                        return real_ip
+                    
+                    # Fallback to remote address
+                    return request.environ.get('REMOTE_ADDR')
+            
+            return None
+        except Exception as e:
+            print(f"Error getting client IP: {e}")
+            return None
+    
+    def lookup_ip_info(self, ip_address):
+        """Look up IP address information using multiple services"""
+        if not ip_address:
+            return None
+            
+        try:
+            # Validate IP address
+            ipaddress.ip_address(ip_address)
+        except ValueError:
+            return None
+        
+        # Try multiple IP lookup services for redundancy
+        services = [
+            self._lookup_ipapi(ip_address),
+            self._lookup_ipinfo(ip_address),
+            self._lookup_ipgeolocation(ip_address)
+        ]
+        
+        # Return the first successful lookup
+        for result in services:
+            if result:
+                return result
+        
+        return None
+    
+    def _lookup_ipapi(self, ip_address):
+        """Lookup using ipapi.co"""
+        try:
+            response = requests.get(f"http://ipapi.co/{ip_address}/json/", timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                return {
+                    'ip': data.get('ip'),
+                    'city': data.get('city'),
+                    'region': data.get('region'),
+                    'country': data.get('country_name'),
+                    'country_code': data.get('country_code'),
+                    'org': data.get('org'),
+                    'isp': data.get('org'),
+                    'timezone': data.get('timezone'),
+                    'latitude': data.get('latitude'),
+                    'longitude': data.get('longitude'),
+                    'service': 'ipapi.co'
+                }
+        except Exception as e:
+            print(f"ipapi.co lookup failed: {e}")
+        return None
+    
+    def _lookup_ipinfo(self, ip_address):
+        """Lookup using ipinfo.io (free tier)"""
+        try:
+            response = requests.get(f"https://ipinfo.io/{ip_address}/json", timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                return {
+                    'ip': data.get('ip'),
+                    'city': data.get('city'),
+                    'region': data.get('region'),
+                    'country': data.get('country'),
+                    'country_code': data.get('country'),
+                    'org': data.get('org'),
+                    'isp': data.get('org'),
+                    'timezone': data.get('timezone'),
+                    'latitude': data.get('loc', '').split(',')[0] if data.get('loc') else None,
+                    'longitude': data.get('loc', '').split(',')[1] if data.get('loc') else None,
+                    'service': 'ipinfo.io'
+                }
+        except Exception as e:
+            print(f"ipinfo.io lookup failed: {e}")
+        return None
+    
+    def _lookup_ipgeolocation(self, ip_address):
+        """Lookup using ipgeolocation.io (free tier)"""
+        try:
+            response = requests.get(f"https://api.ipgeolocation.io/ipgeo?apiKey=free&ip={ip_address}", timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                return {
+                    'ip': data.get('ip'),
+                    'city': data.get('city'),
+                    'region': data.get('state_prov'),
+                    'country': data.get('country_name'),
+                    'country_code': data.get('country_code2'),
+                    'org': data.get('organization'),
+                    'isp': data.get('isp'),
+                    'timezone': data.get('time_zone', {}).get('name'),
+                    'latitude': data.get('latitude'),
+                    'longitude': data.get('longitude'),
+                    'service': 'ipgeolocation.io'
+                }
+        except Exception as e:
+            print(f"ipgeolocation.io lookup failed: {e}")
+        return None
+    
+    def detect_vpn_proxy(self, ip_info):
+        """Detect if IP is likely a VPN or proxy"""
+        if not ip_info:
+            return {'is_vpn': False, 'confidence': 0, 'reasons': []}
+        
+        reasons = []
+        confidence = 0
+        
+        # Check organization/ISP name for VPN indicators
+        org = ip_info.get('org', '').lower()
+        isp = ip_info.get('isp', '').lower()
+        
+        for indicator in self.vpn_indicators:
+            if indicator in org or indicator in isp:
+                reasons.append(f"Organization/ISP contains '{indicator}'")
+                confidence += 20
+        
+        # Check for known VPN providers
+        for provider in self.known_vpn_providers:
+            if provider in org or provider in isp:
+                reasons.append(f"Known VPN provider: {provider}")
+                confidence += 40
+        
+        # Check for datacenter/hosting indicators
+        datacenter_indicators = [
+            'datacenter', 'data center', 'hosting', 'cloud', 'server',
+            'amazon', 'aws', 'google cloud', 'azure', 'digital ocean',
+            'linode', 'vultr', 'ovh', 'hetzner', 'contabo'
+        ]
+        
+        for indicator in datacenter_indicators:
+            if indicator in org or indicator in isp:
+                reasons.append(f"Datacenter/hosting provider: {indicator}")
+                confidence += 15
+        
+        # Check for suspicious patterns
+        if 'tor' in org or 'tor' in isp:
+            reasons.append("Tor network detected")
+            confidence += 50
+        
+        # Determine if likely VPN/proxy
+        is_vpn = confidence >= 30
+        
+        return {
+            'is_vpn': is_vpn,
+            'confidence': min(confidence, 100),
+            'reasons': reasons,
+            'org': org,
+            'isp': isp
+        }
+    
+    def validate_dealer_source(self, ip_info, vpn_detection):
+        """Validate if the request appears to come from a legitimate dealer"""
+        if not ip_info:
+            return {
+                'is_valid': False,
+                'status': 'UNKNOWN',
+                'message': 'Unable to determine IP location'
+            }
+        
+        if vpn_detection['is_vpn']:
+            return {
+                'is_valid': False,
+                'status': 'SUSPICIOUS',
+                'message': f"VPN/Proxy detected (confidence: {vpn_detection['confidence']}%)",
+                'reasons': vpn_detection['reasons']
+            }
+        
+        # Check if location makes sense for a dealer
+        country = ip_info.get('country', '').lower()
+        city = ip_info.get('city', '').lower()
+        
+        # US-based dealers are most common
+        if country in ['united states', 'us', 'usa']:
+            return {
+                'is_valid': True,
+                'status': 'VALID',
+                'message': f"US-based request from {city}, {ip_info.get('region', 'Unknown Region')}"
+            }
+        
+        # Other countries might be valid but require review
+        return {
+            'is_valid': True,
+            'status': 'REVIEW_NEEDED',
+            'message': f"International request from {city}, {country}",
+            'country': country,
+            'city': city
+        }
 
 class ScreenshotProcessor:
     """Enhanced screenshot processing for bucket files"""
@@ -428,15 +661,45 @@ class CancellationProcessor:
         ]
         fields['is_diversicare'] = any(re.search(pattern, text, re.IGNORECASE) for pattern in diversicare_patterns)
         
-        # Signature patterns
+        # Enhanced signature detection
         signature_patterns = [
             r'signature',
             r'signed',
             r'sign\s*here',
             r'authorized\s*signature',
-            r'customer\s*signature'
+            r'customer\s*signature',
+            r'_________________',
+            r'________________',
+            r'_______________',
+            r'______________',
+            r'_____________',
+            r'____________',
+            r'___________',
+            r'__________',
+            r'_________',
+            r'________',
+            r'_______',
+            r'______',
+            r'_____',
+            r'____',
+            r'___',
+            r'__',
+            r'_'
         ]
-        fields['has_signature'] = any(re.search(pattern, text, re.IGNORECASE) for pattern in signature_patterns)
+        
+        # Basic signature text detection
+        has_signature_text = any(re.search(pattern, text, re.IGNORECASE) for pattern in signature_patterns)
+        
+        # Enhanced signature detection for images
+        signature_quality = "none"
+        signature_image_path = None
+        
+        if file_path and os.path.splitext(file_path)[1].lower() in ['.png', '.jpg', '.jpeg', '.tiff', '.tif']:
+            signature_quality, signature_image_path = self.detect_signature_in_image(file_path)
+        
+        fields['has_signature'] = has_signature_text or signature_quality != "none"
+        fields['signature_quality'] = signature_quality
+        fields['signature_image_path'] = signature_image_path
         
         # PCMI hint patterns
         pcmi_patterns = [
@@ -541,96 +804,289 @@ class CancellationProcessor:
         
         return [best_reason] if best_reason else reasons
     
-    def display_file_content(self, file_data, temp_dir):
-        """Display file content for manual review"""
+    def detect_signature_in_image(self, image_path):
+        """Detect and analyze signatures in images"""
+        try:
+            if not OPENCV_AVAILABLE:
+                return "none", None
+                
+            # Load image
+            image = cv2.imread(image_path)
+            if image is None:
+                return "none", None
+                
+            # Convert to grayscale
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            
+            # Apply preprocessing for signature detection
+            # Use adaptive thresholding to better detect handwritten signatures
+            thresh = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2)
+            
+            # Find contours
+            contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            signature_areas = []
+            signature_quality = "none"
+            
+            for contour in contours:
+                # Calculate contour properties
+                area = cv2.contourArea(contour)
+                x, y, w, h = cv2.boundingRect(contour)
+                aspect_ratio = w / h if h > 0 else 0
+                
+                # Signature characteristics:
+                # - Reasonable size (not too small, not too large)
+                # - Reasonable aspect ratio (not too square, not too thin)
+                # - Complex shape (not just a dot or line)
+                if (area > 500 and area < 50000 and  # Size range
+                    0.2 < aspect_ratio < 5.0 and  # Aspect ratio range
+                    len(contour) > 20):  # Complex shape (enough points)
+                    
+                    # Calculate complexity (perimeter^2 / area ratio)
+                    perimeter = cv2.arcLength(contour, True)
+                    if perimeter > 0:
+                        complexity = (perimeter * perimeter) / area
+                        
+                        # Signatures typically have moderate to high complexity
+                        if complexity > 10:  # Threshold for signature-like complexity
+                            signature_areas.append((x, y, w, h, complexity))
+            
+            if signature_areas:
+                # Sort by complexity (most complex first)
+                signature_areas.sort(key=lambda x: x[4], reverse=True)
+                
+                # Get the best signature area
+                best_sig = signature_areas[0]
+                x, y, w, h, complexity = best_sig
+                
+                # Determine quality based on complexity and size
+                if complexity > 50 and area > 2000:
+                    signature_quality = "excellent"
+                elif complexity > 30 and area > 1000:
+                    signature_quality = "good"
+                elif complexity > 15 and area > 500:
+                    signature_quality = "fair"
+                else:
+                    signature_quality = "poor"
+                
+                # Extract signature region
+                signature_region = image[y:y+h, x:x+w]
+                
+                # Save signature image for display
+                signature_filename = f"signature_{os.path.basename(image_path)}"
+                signature_path = os.path.join(os.path.dirname(image_path), signature_filename)
+                cv2.imwrite(signature_path, signature_region)
+                
+                return signature_quality, signature_path
+            
+            return "none", None
+            
+        except Exception as e:
+            print(f"Error detecting signature in {image_path}: {e}")
+            return "none", None
+    
+    def create_thumbnail(self, file_data, temp_dir, size=(200, 150)):
+        """Create a thumbnail for file display"""
         filename = file_data['filename']
         file_path = os.path.join(temp_dir, filename)
-        
-        st.subheader(f"📄 {filename}")
-        
-        # Show file type and basic info
         file_ext = os.path.splitext(filename)[1].lower()
-        st.write(f"**File Type:** {file_ext.upper()}")
         
-        if file_data.get('is_handwritten', False):
-            st.warning("⚠️ **HANDWRITTEN DOCUMENT DETECTED** - Manual review required")
-        
-        # Display based on file type
-        if file_ext in ['.png', '.jpg', '.jpeg', '.tiff', '.tif']:
-            try:
+        try:
+            if file_ext in ['.png', '.jpg', '.jpeg', '.tiff', '.tif']:
+                # For images, create a thumbnail
                 image = Image.open(file_path)
-                st.image(image, caption=filename, use_column_width=True)
-                
-                # Show extracted text
-                if file_data.get('raw_text'):
-                    with st.expander("🔍 Extracted Text (OCR)"):
-                        st.text(file_data['raw_text'])
-                        
-            except Exception as e:
-                st.error(f"Error displaying image: {e}")
-                
-        elif file_ext == '.pdf':
+                image.thumbnail(size, Image.Resampling.LANCZOS)
+                return image
+            elif file_ext == '.pdf':
+                # For PDFs, create a simple icon
+                from PIL import ImageDraw, ImageFont
+                img = Image.new('RGB', size, color='white')
+                draw = ImageDraw.Draw(img)
+                try:
+                    # Try to use a default font
+                    font = ImageFont.load_default()
+                except:
+                    font = None
+                draw.text((10, 10), "PDF", fill='red', font=font)
+                draw.text((10, 30), filename[:20], fill='black', font=font)
+                return img
+            elif file_ext in ['.docx', '.doc']:
+                # For Word docs, create a simple icon
+                from PIL import ImageDraw, ImageFont
+                img = Image.new('RGB', size, color='white')
+                draw = ImageDraw.Draw(img)
+                try:
+                    font = ImageFont.load_default()
+                except:
+                    font = None
+                draw.text((10, 10), "DOC", fill='blue', font=font)
+                draw.text((10, 30), filename[:20], fill='black', font=font)
+                return img
+            elif file_ext == '.txt':
+                # For text files, create a simple icon
+                from PIL import ImageDraw, ImageFont
+                img = Image.new('RGB', size, color='white')
+                draw = ImageDraw.Draw(img)
+                try:
+                    font = ImageFont.load_default()
+                except:
+                    font = None
+                draw.text((10, 10), "TXT", fill='green', font=font)
+                draw.text((10, 30), filename[:20], fill='black', font=font)
+                return img
+            else:
+                # Default icon for unknown file types
+                from PIL import ImageDraw, ImageFont
+                img = Image.new('RGB', size, color='lightgray')
+                draw = ImageDraw.Draw(img)
+                try:
+                    font = ImageFont.load_default()
+                except:
+                    font = None
+                draw.text((10, 10), "FILE", fill='black', font=font)
+                draw.text((10, 30), filename[:20], fill='black', font=font)
+                return img
+        except Exception as e:
+            # Error thumbnail
+            from PIL import ImageDraw, ImageFont
+            img = Image.new('RGB', size, color='red')
+            draw = ImageDraw.Draw(img)
             try:
-                with open(file_path, 'rb') as f:
-                    # For PDFs, show extracted text
-                    if file_data.get('raw_text'):
-                        st.text_area("Extracted Text:", file_data['raw_text'], height=200)
-                    else:
-                        st.info("No text extracted from PDF")
-            except Exception as e:
-                st.error(f"Error reading PDF: {e}")
-                
-        elif file_ext in ['.docx', '.doc']:
-            try:
-                if file_data.get('raw_text'):
-                    st.text_area("Extracted Text:", file_data['raw_text'], height=200)
-                else:
-                    st.info("No text extracted from document")
-            except Exception as e:
-                st.error(f"Error reading document: {e}")
-                
-        elif file_ext == '.txt':
-            try:
-                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                    content = f.read()
-                    st.text_area("File Content:", content, height=200)
-            except Exception as e:
-                st.error(f"Error reading text file: {e}")
+                font = ImageFont.load_default()
+            except:
+                font = None
+            draw.text((10, 10), "ERROR", fill='white', font=font)
+            draw.text((10, 30), str(e)[:20], fill='white', font=font)
+            return img
+    
+    def display_file_thumbnails(self, files_data, temp_dir):
+        """Display all files as thumbnails in a clean grid"""
+        if not files_data:
+            st.info("No files to display")
+            return
         
-        # Show extracted fields
-        with st.expander("📊 Extracted Data"):
-            col1, col2 = st.columns(2)
+        st.subheader("📁 File Thumbnails - Quick Review")
+        st.markdown("All uploaded files displayed as thumbnails for easy review")
+        
+        # Calculate grid layout (3 columns)
+        num_files = len(files_data)
+        cols_per_row = 3
+        
+        for i in range(0, num_files, cols_per_row):
+            # Create columns for this row
+            cols = st.columns(cols_per_row)
             
-            with col1:
-                if file_data.get('vins'):
-                    st.write("**VINs:**", ", ".join(file_data['vins']))
-                if file_data.get('contracts'):
-                    st.write("**Contracts:**", ", ".join(file_data['contracts']))
-                if file_data.get('reasons'):
-                    st.write("**Reasons:**", ", ".join(file_data['reasons']))
-                if file_data.get('cancellation_dates'):
-                    st.write("**Cancellation Dates:**", ", ".join(file_data['cancellation_dates']))
+            for j, col in enumerate(cols):
+                file_idx = i + j
+                if file_idx < num_files:
+                    file_data = files_data[file_idx]
+                    filename = file_data['filename']
+                    file_ext = os.path.splitext(filename)[1].lower()
                     
-            with col2:
-                if file_data.get('sale_dates'):
-                    st.write("**Sale Dates:**", ", ".join(file_data['sale_dates']))
-                if file_data.get('customer_names'):
-                    st.write("**Customer Names:**", ", ".join(file_data['customer_names']))
-                if file_data.get('mileages'):
-                    st.write("**Mileages:**", ", ".join(file_data['mileages']))
-                if file_data.get('refund_addresses'):
-                    st.write("**Refund Addresses:**", ", ".join(file_data['refund_addresses']))
-        
-        st.divider()
+                    with col:
+                        # Create thumbnail
+                        thumbnail = self.create_thumbnail(file_data, temp_dir)
+                        st.image(thumbnail, caption=filename, use_column_width=True)
+                        
+                        # File info
+                        st.write(f"**{filename}**")
+                        st.write(f"Type: {file_ext.upper()}")
+                        
+                        # Status indicators
+                        status_indicators = []
+                        if file_data.get('is_handwritten', False):
+                            status_indicators.append("⚠️ Handwritten")
+                        if file_data.get('has_signature', False):
+                            quality = file_data.get('signature_quality', 'unknown')
+                            status_indicators.append(f"✍️ Signature ({quality})")
+                        if file_data.get('is_lender_letter', False):
+                            status_indicators.append("📄 Lender Letter")
+                        if file_data.get('has_pcmi_hint', False):
+                            status_indicators.append("📊 PCMI Screenshot")
+                        
+                        if status_indicators:
+                            for indicator in status_indicators:
+                                st.write(indicator)
+                        
+                        # Quick data preview
+                        with st.expander("📊 Quick Data"):
+                            col1, col2 = st.columns(2)
+                            
+                            with col1:
+                                if file_data.get('vins'):
+                                    st.write(f"**VINs:** {len(file_data['vins'])}")
+                                if file_data.get('contracts'):
+                                    st.write(f"**Contracts:** {len(file_data['contracts'])}")
+                                if file_data.get('reasons'):
+                                    st.write(f"**Reasons:** {len(file_data['reasons'])}")
+                                    
+                            with col2:
+                                if file_data.get('cancellation_dates'):
+                                    st.write(f"**Dates:** {len(file_data['cancellation_dates'])}")
+                                if file_data.get('customer_names'):
+                                    st.write(f"**Names:** {len(file_data['customer_names'])}")
+                                if file_data.get('mileages'):
+                                    st.write(f"**Mileages:** {len(file_data['mileages'])}")
+                        
+                        # Show signature image if available
+                        if file_data.get('signature_image_path') and os.path.exists(file_data['signature_image_path']):
+                            st.write("**Detected Signature:**")
+                            try:
+                                sig_image = Image.open(file_data['signature_image_path'])
+                                st.image(sig_image, width=150)
+                            except Exception as e:
+                                st.write(f"Error loading signature: {e}")
+                        
+                        st.divider()
     
     def parse_date(self, date_str):
         """Parse date string in various formats"""
-        formats = ['%m/%d/%Y', '%m-%d-%Y', '%m/%d/%y', '%m-%d-%y']
+        if not date_str or not date_str.strip():
+            return None
+            
+        date_str = date_str.strip()
+        
+        # Try multiple date formats
+        formats = [
+            '%m/%d/%Y', '%m-%d-%Y', '%m/%d/%y', '%m-%d-%y',
+            '%Y-%m-%d', '%Y/%m/%d', '%d/%m/%Y', '%d-%m-%Y',
+            '%B %d, %Y', '%b %d, %Y', '%d %B %Y', '%d %b %Y',
+            '%m/%d', '%m-%d', '%d/%m', '%d-%m'
+        ]
+        
         for fmt in formats:
             try:
-                return datetime.strptime(date_str, fmt)
+                parsed_date = datetime.strptime(date_str, fmt)
+                # If year is missing, assume current year
+                if parsed_date.year == 1900:
+                    parsed_date = parsed_date.replace(year=datetime.now().year)
+                return parsed_date
             except ValueError:
                 continue
+        
+        # Try to extract date from text using regex
+        date_patterns = [
+            r'(\d{1,2})/(\d{1,2})/(\d{4})',  # MM/DD/YYYY
+            r'(\d{1,2})-(\d{1,2})-(\d{4})',  # MM-DD-YYYY
+            r'(\d{4})-(\d{1,2})-(\d{1,2})',  # YYYY-MM-DD
+            r'(\d{1,2})/(\d{1,2})/(\d{2})',  # MM/DD/YY
+            r'(\d{1,2})-(\d{1,2})-(\d{2})',  # MM-DD-YY
+        ]
+        
+        for pattern in date_patterns:
+            match = re.search(pattern, date_str)
+            if match:
+                try:
+                    groups = match.groups()
+                    if len(groups) == 3:
+                        month, day, year = groups
+                        year = int(year)
+                        if year < 100:  # Two-digit year
+                            year += 2000 if year < 50 else 1900
+                        return datetime(int(year), int(month), int(day))
+                except ValueError:
+                    continue
+        
         return None
     
     def reconcile_values(self, values):
@@ -851,14 +1307,35 @@ class CancellationProcessor:
             result['Sale Date'] = all_sale_dates[0]  # Take first one
         
         # 90-day check
+        # 90-day rule check with improved date parsing
         cxl_date = self.parse_date(result['Cancellation Effective Date'])
         sale_date = self.parse_date(result['Sale Date'])
         
         if cxl_date and sale_date:
             days_diff = (cxl_date - sale_date).days
             result['Is the cancellation effective date past 90 days from contract sale date?'] = 'Yes' if days_diff > 90 else 'No'
+            result['Days Difference'] = f"{days_diff} days"
         else:
-            result['Is the cancellation effective date past 90 days from contract sale date?'] = 'Unknown'
+            # Try to parse dates from all available date fields
+            all_cxl_dates = [d for f in files for d in f.get('cancellation_dates', []) if d.strip()]
+            all_sale_dates = [d for f in files for d in f.get('sale_dates', []) if d.strip()]
+            
+            # Try parsing each date combination
+            for cxl_date_str in all_cxl_dates:
+                for sale_date_str in all_sale_dates:
+                    cxl_date = self.parse_date(cxl_date_str)
+                    sale_date = self.parse_date(sale_date_str)
+                    if cxl_date and sale_date:
+                        days_diff = (cxl_date - sale_date).days
+                        result['Is the cancellation effective date past 90 days from contract sale date?'] = 'Yes' if days_diff > 90 else 'No'
+                        result['Days Difference'] = f"{days_diff} days"
+                        break
+                if 'Days Difference' in result:
+                    break
+            
+            if 'Days Difference' not in result:
+                result['Is the cancellation effective date past 90 days from contract sale date?'] = 'Unknown - No valid dates found'
+                result['Days Difference'] = 'N/A'
         
         # Enhanced NCB flags with amounts (NCB = No Chargeback)
         if agent_ncb_amounts:
@@ -879,8 +1356,25 @@ class CancellationProcessor:
             result['Is there a different address to send the refund? (only applicable if the request included a lender letter addressed to Ascent)'] = 'No'
             result['Alt Refund Address (if any)'] = ''
         
-        # Signatures
-        result['All necessary signatures collected?'] = "Likely (detected 'Signature' text)" if has_signature else "Needs manual check"
+        # Enhanced signature evaluation
+        signature_qualities = [f.get('signature_quality', 'none') for f in files if f.get('has_signature', False)]
+        signature_images = [f.get('signature_image_path') for f in files if f.get('signature_image_path')]
+        
+        if has_signature:
+            if any(q in ['excellent', 'good'] for q in signature_qualities):
+                result['All necessary signatures collected?'] = 'Yes - High Quality'
+            elif any(q in ['fair', 'poor'] for q in signature_qualities):
+                result['All necessary signatures collected?'] = 'Yes - Low Quality (Review Recommended)'
+            else:
+                result['All necessary signatures collected?'] = 'Yes - Text Only'
+            
+            # Store signature quality and images for display
+            result['Signature Quality'] = ', '.join([q for q in signature_qualities if q != 'none'])
+            result['Signature Images'] = [img for img in signature_images if img]
+        else:
+            result['All necessary signatures collected?'] = 'No'
+            result['Signature Quality'] = 'None'
+            result['Signature Images'] = []
         
         # Contract types
         result['Is this an Autohouse Contract?'] = 'Yes' if is_autohouse else 'No'
@@ -938,6 +1432,36 @@ class CancellationProcessor:
 # Main app
 def main():
     processor = CancellationProcessor()
+    
+    # Initialize IP security checker
+    ip_checker = IPSecurityChecker()
+    
+    # Get client IP and perform security check
+    client_ip = ip_checker.get_client_ip()
+    ip_info = None
+    vpn_detection = None
+    security_validation = None
+    
+    if client_ip:
+        with st.spinner("🔍 Checking IP address and security..."):
+            ip_info = ip_checker.lookup_ip_info(client_ip)
+            if ip_info:
+                vpn_detection = ip_checker.detect_vpn_proxy(ip_info)
+                security_validation = ip_checker.validate_dealer_source(ip_info, vpn_detection)
+    
+    # Display security status
+    if security_validation:
+        if security_validation['status'] == 'SUSPICIOUS':
+            st.error(f"🚨 **SECURITY ALERT**: {security_validation['message']}")
+            if security_validation.get('reasons'):
+                for reason in security_validation['reasons']:
+                    st.write(f"• {reason}")
+        elif security_validation['status'] == 'REVIEW_NEEDED':
+            st.warning(f"⚠️ **REVIEW NEEDED**: {security_validation['message']}")
+        elif security_validation['status'] == 'VALID':
+            st.success(f"✅ **VERIFIED**: {security_validation['message']}")
+        else:
+            st.info(f"ℹ️ **STATUS**: {security_validation['message']}")
     
     # Create two columns for uploads
     col1, col2 = st.columns(2)
@@ -1046,6 +1570,27 @@ def main():
                     
                     # Summary statistics - more prominent
                     st.subheader("📊 QC Analysis Summary")
+                    
+                    # Display IP security information
+                    if ip_info and security_validation:
+                        st.subheader("🔒 Security Verification")
+                        col1, col2, col3 = st.columns(3)
+                        
+                        with col1:
+                            st.metric("IP Address", client_ip)
+                        with col2:
+                            st.metric("Location", f"{ip_info.get('city', 'Unknown')}, {ip_info.get('country', 'Unknown')}")
+                        with col3:
+                            status_color = "🟢" if security_validation['status'] == 'VALID' else "🟡" if security_validation['status'] == 'REVIEW_NEEDED' else "🔴"
+                            st.metric("Security Status", f"{status_color} {security_validation['status']}")
+                        
+                        if vpn_detection and vpn_detection['is_vpn']:
+                            st.warning(f"⚠️ VPN/Proxy detected with {vpn_detection['confidence']}% confidence")
+                            for reason in vpn_detection['reasons']:
+                                st.write(f"• {reason}")
+                        
+                        st.divider()
+                    
                     col1, col2, col3, col4, col5 = st.columns(5)
                     
                     with col1:
@@ -1175,8 +1720,12 @@ def main():
                             days_status = result.get('Is the cancellation effective date past 90 days from contract sale date?', 'Unknown')
                             days_color = "🟢" if days_status == "Yes" else "🔴" if days_status == "No" else "🟡"
                             st.markdown(f"{days_color} 90+ Days: {days_status}")
+                            if result.get('Days Difference'):
+                                st.markdown(f"   └─ Days: {result.get('Days Difference')}")
                             if result.get('Sale Date'):
                                 st.markdown(f"   └─ Sale Date: {result.get('Sale Date')}")
+                            if result.get('Cancellation Effective Date'):
+                                st.markdown(f"   └─ Cancellation Date: {result.get('Cancellation Effective Date')}")
                             
                             # Agent NCB (No Chargeback)
                             agent_ncb = result.get('Is there an Agent NCB Fee?', 'No')
@@ -1185,7 +1734,8 @@ def main():
                             
                             # Dealer NCB (No Chargeback)
                             dealer_ncb = result.get('Is there a Dealer NCB Fee?', 'No')
-                            dealer_color = "🟢" if "Yes" in dealer_ncb else "🔴" if "No" in dealer_ncb else "🟡"
+                            # "No" means no chargeback (good), "Yes" means there is NCB protection (also good)
+                            dealer_color = "🟢" if "No" in dealer_ncb or "Yes" in dealer_ncb else "🟡"
                             st.markdown(f"{dealer_color} Dealer NCB (No Chargeback): {dealer_ncb}")
                             
                             # Refund Address
@@ -1329,17 +1879,8 @@ def main():
                             if result.get('Mileage values found'):
                                 st.write(f"• Mileage: {result.get('Mileage values found', 'N/A')}")
                     
-                    # Add file viewing section
-                    st.subheader("📁 File Viewer - Manual Review")
-                    st.markdown("Click on any file below to view its content and extracted data for manual review.")
-                    
-                    # Create tabs for each file
-                    if processor.files_data:
-                        file_tabs = st.tabs([f"📄 {file_data['filename']}" for file_data in processor.files_data])
-                        
-                        for i, (file_data, tab) in enumerate(zip(processor.files_data, file_tabs)):
-                            with tab:
-                                processor.display_file_content(file_data, temp_dir)
+                    # Add file thumbnail viewing section
+                    processor.display_file_thumbnails(processor.files_data, temp_dir)
                 
                 else:
                     st.warning("No valid files found in the ZIP archive.")
