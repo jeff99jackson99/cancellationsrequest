@@ -335,10 +335,18 @@ class ScreenshotProcessor:
             processed_image = self.preprocess_image(image)
             
             # Extract text using OCR with settings optimized for handwritten text
-            text = pytesseract.image_to_string(processed_image, config='--psm 6 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,;:()[]{}\"/- ')
+            try:
+                text = pytesseract.image_to_string(processed_image, config='--psm 6 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,;:()[]{}\"/- ')
+            except Exception as e:
+                print(f"OCR failed with processed image: {e}")
+                text = ""
             
             # Also try with different OCR settings for handwritten text
-            text_alt = pytesseract.image_to_string(image, config='--psm 3 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,;:()[]{}\"/- ')
+            try:
+                text_alt = pytesseract.image_to_string(image, config='--psm 3 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,;:()[]{}\"/- ')
+            except Exception as e:
+                print(f"OCR failed with original image: {e}")
+                text_alt = ""
             
             # Combine both results
             combined_text = text + "\n" + text_alt
@@ -433,9 +441,14 @@ class CancellationProcessor:
                 else:
                     try:
                         image = Image.open(file_path)
-                        text = pytesseract.image_to_string(image, config='--psm 6 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,;:()[]{}\"/- ')
+                        try:
+                            text = pytesseract.image_to_string(image, config='--psm 6 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,;:()[]{}\"/- ')
+                        except Exception as ocr_error:
+                            print(f"OCR failed for {file_path}: {ocr_error}")
+                            text = ""
                     except Exception as e:
-                        st.warning(f"OCR failed for {file_path}: {e}")
+                        st.warning(f"Error processing image {file_path}: {e}")
+                        text = ""
             elif file_ext == '.txt':
                 with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                     text = f.read()
@@ -449,10 +462,15 @@ class CancellationProcessor:
         try:
             image = Image.open(file_path)
             # Quick OCR to check for bucket-related keywords
-            text = pytesseract.image_to_string(image, config='--psm 6 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,;:()[]{}\"/- ')
+            try:
+                text = pytesseract.image_to_string(image, config='--psm 6 -c tessedit_char_whitelist=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789.,;:()[]{}\"/- ')
+            except Exception as ocr_error:
+                print(f"OCR failed in bucket detection for {file_path}: {ocr_error}")
+                return False
             bucket_keywords = ['ncb', 'bucket', 'fee', 'agent', 'dealer', 'chargeback', 'pcmi']
             return any(keyword in text.lower() for keyword in bucket_keywords)
-        except:
+        except Exception as e:
+            print(f"Error in bucket detection for {file_path}: {e}")
             return False
     
     def is_handwritten_document(self, file_path, text):
@@ -986,7 +1004,7 @@ class CancellationProcessor:
                     with col:
                         # Create thumbnail
                         thumbnail = self.create_thumbnail(file_data, temp_dir)
-                        st.image(thumbnail, caption=filename, use_column_width=True)
+                        st.image(thumbnail, caption=filename, use_container_width=True)
                         
                         # File info
                         st.write(f"**{filename}**")
@@ -1471,8 +1489,7 @@ class CancellationProcessor:
         else:
             result['Sale Date'] = all_sale_dates[0]  # Take first one
         
-        # 90-day check
-        # 90-day rule check with improved date parsing
+        # 90-day check with improved date parsing
         cxl_date = self.parse_date(result['Cancellation Effective Date'])
         sale_date = self.parse_date(result['Sale Date'])
         
@@ -1498,7 +1515,16 @@ class CancellationProcessor:
                 if 'Days Difference' in result:
                     break
             
-            if 'Days Difference' not in result:
+            # If still no valid dates, check if we have a future cancellation date
+            if 'Days Difference' not in result and cxl_date:
+                current_date = datetime.now()
+                if cxl_date > current_date:
+                    result['Is the cancellation effective date past 90 days from contract sale date?'] = 'Future Date - Cannot Calculate'
+                    result['Days Difference'] = f"Future date: {cxl_date.strftime('%m/%d/%Y')}"
+                else:
+                    result['Is the cancellation effective date past 90 days from contract sale date?'] = 'Unknown - No sale date found'
+                    result['Days Difference'] = 'N/A'
+            elif 'Days Difference' not in result:
                 result['Is the cancellation effective date past 90 days from contract sale date?'] = 'Unknown - No valid dates found'
                 result['Days Difference'] = 'N/A'
         
