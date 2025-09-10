@@ -77,7 +77,7 @@ class SimpleCancellationProcessor:
             return ""
     
     def extract_fields(self, text, filename):
-        """Extract key fields from text"""
+        """Extract key fields from text with better patterns"""
         fields = {
             'vin': [],
             'contract': [],
@@ -91,94 +91,113 @@ class SimpleCancellationProcessor:
             'no_chargeback': []
         }
         
-        # VIN patterns
+        # VIN patterns - more flexible
         vin_patterns = [
             r'\b([A-HJ-NPR-Z0-9]{17})\b',
             r'VIN[:\s]*([A-HJ-NPR-Z0-9]{17})',
-            r'Vehicle[:\s]*ID[:\s]*([A-HJ-NPR-Z0-9]{17})'
+            r'Vehicle[:\s]*ID[:\s]*([A-HJ-NPR-Z0-9]{17})',
+            r'VIN[:\s]*([A-HJ-NPR-Z0-9]{17})',
+            r'([A-HJ-NPR-Z0-9]{17})'
         ]
         for pattern in vin_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
             fields['vin'].extend(matches)
         
-        # Contract patterns
+        # Contract patterns - more flexible
         contract_patterns = [
-            r'Contract[:\s]*#?\s*:?\s*([A-Z0-9]{8,15})(?:\s|$|\n)',
-            r'Contract[:\s]*Number[:\s]*([A-Z0-9]{8,15})(?:\s|$|\n)',
-            r'PN[:\s]*([A-Z0-9]{8,15})(?:\s|$|\n)',
-            r'DL[:\s]*([A-Z0-9]{8,15})(?:\s|$|\n)',
-            r'#\s*([A-Z0-9]{8,15})(?:\s|$|\n)'
+            r'Contract[:\s]*#?\s*:?\s*([A-Z0-9]{6,20})',
+            r'Contract[:\s]*Number[:\s]*([A-Z0-9]{6,20})',
+            r'PN[:\s]*([A-Z0-9]{6,20})',
+            r'DL[:\s]*([A-Z0-9]{6,20})',
+            r'#\s*([A-Z0-9]{6,20})',
+            r'Policy[:\s]*#?\s*:?\s*([A-Z0-9]{6,20})',
+            r'Agreement[:\s]*#?\s*:?\s*([A-Z0-9]{6,20})',
+            r'([A-Z0-9]{8,15})'  # Generic pattern for any alphanumeric 8-15 chars
         ]
         for pattern in contract_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
             for match in matches:
-                if len(match) >= 8 and match.isalnum():
+                if len(match) >= 6 and len(match) <= 20 and match.isalnum():
                     fields['contract'].append(match)
         
-        # Customer name patterns
+        # Customer name patterns - more flexible
         customer_patterns = [
-            r'Customer[:\s]*Name[:\s]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})(?:\s|$|\n)',
-            r'Name[:\s]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})(?:\s|$|\n)',
-            r'Buyer[:\s]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})(?:\s|$|\n)'
+            r'Customer[:\s]*Name[:\s]*([A-Z][a-zA-Z\s]+)',
+            r'Name[:\s]*([A-Z][a-zA-Z\s]+)',
+            r'Buyer[:\s]*([A-Z][a-zA-Z\s]+)',
+            r'Purchaser[:\s]*([A-Z][a-zA-Z\s]+)',
+            r'Client[:\s]*Name[:\s]*([A-Z][a-zA-Z\s]+)',
+            r'Policyholder[:\s]*([A-Z][a-zA-Z\s]+)'
         ]
         for pattern in customer_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
             for match in matches:
-                if 2 <= len(match.split()) <= 4:
-                    fields['customer_name'].append(match)
+                clean_match = match.strip()
+                if len(clean_match.split()) >= 2 and len(clean_match.split()) <= 4:
+                    fields['customer_name'].append(clean_match)
         
-        # Date patterns
+        # Date patterns - more comprehensive
         date_patterns = [
             r'(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})',
             r'(\d{4}[/-]\d{1,2}[/-]\d{1,2})',
-            r'([A-Za-z]+ \d{1,2},? \d{4})'
+            r'([A-Za-z]+ \d{1,2},? \d{4})',
+            r'(\d{1,2}\s+[A-Za-z]+\s+\d{4})',
+            r'([A-Za-z]+\s+\d{1,2},?\s+\d{4})'
         ]
         for pattern in date_patterns:
             matches = re.findall(pattern, text)
             fields['cancellation_date'].extend(matches)
             fields['sale_date'].extend(matches)
         
-        # Reason patterns
+        # Reason patterns - more flexible
         reason_patterns = [
-            r'Reason[:\s]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})(?:\s|$|\n)',
-            r'Cancellation[:\s]*Reason[:\s]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})(?:\s|$|\n)',
-            r'Customer[:\s]*Request[:\s]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})(?:\s|$|\n)'
+            r'Reason[:\s]*([A-Za-z\s]+)',
+            r'Cancellation[:\s]*Reason[:\s]*([A-Za-z\s]+)',
+            r'Customer[:\s]*Request[:\s]*([A-Za-z\s]+)',
+            r'Why[:\s]*([A-Za-z\s]+)',
+            r'Cause[:\s]*([A-Za-z\s]+)',
+            r'Explanation[:\s]*([A-Za-z\s]+)'
         ]
         for pattern in reason_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
             for match in matches:
-                if 1 <= len(match.split()) <= 3:
-                    fields['reason'].append(match)
+                clean_match = match.strip()
+                if len(clean_match.split()) >= 1 and len(clean_match.split()) <= 5:
+                    fields['reason'].append(clean_match)
         
-        # Mileage patterns
+        # Mileage patterns - more flexible
         mileage_patterns = [
             r'(\d{3,8})\s*miles?',
             r'Mileage[:\s]*(\d{3,8})',
-            r'(\d{1,3}(?:,\d{3})*)\s*miles?'
+            r'(\d{1,3}(?:,\d{3})*)\s*miles?',
+            r'(\d{3,8})\s*mi',
+            r'(\d{1,3}(?:,\d{3})*)\s*mi'
         ]
         for pattern in mileage_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
             for match in matches:
-                # Clean up the match
                 clean_match = re.sub(r'[^\d]', '', match)
                 if len(clean_match) >= 3 and len(clean_match) <= 8:
                     fields['mileage'].append(clean_match)
         
-        # Financial patterns
+        # Financial patterns - more comprehensive
         money_patterns = [
             r'\$(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)',
-            r'(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)\s*dollars?'
+            r'(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)\s*dollars?',
+            r'Total[:\s]*Refund[:\s]*\$?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)',
+            r'Refund[:\s]*Amount[:\s]*\$?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)',
+            r'Amount[:\s]*\$?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)'
         ]
         for pattern in money_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
             fields['total_refund'].extend(matches)
-            fields['dealer_ncb'].extend(matches)
         
-        # NCB patterns
+        # NCB patterns - more comprehensive
         ncb_patterns = [
             r'NCB[:\s]*(Yes|No|Y|N)',
             r'No[:\s]*Chargeback[:\s]*(Yes|No|Y|N)',
-            r'Dealer[:\s]*NCB[:\s]*(Yes|No|Y|N)'
+            r'Dealer[:\s]*NCB[:\s]*(Yes|No|Y|N)',
+            r'Chargeback[:\s]*(Yes|No|Y|N)'
         ]
         for pattern in ncb_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
@@ -220,6 +239,12 @@ class SimpleCancellationProcessor:
                     if text:
                         # Extract fields
                         fields = self.extract_fields(text, filename)
+                        
+                        # Debug: Print what we found
+                        print(f"\n=== {filename} ===")
+                        for key, values in fields.items():
+                            if values:
+                                print(f"{key}: {values}")
                         
                         # Add to combined results
                         for key, values in fields.items():
