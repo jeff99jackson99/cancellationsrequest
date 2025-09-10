@@ -246,6 +246,12 @@ class QCProcessor:
                         # Extract data
                         data = self.extract_data(text, filename)
                         
+                        # Debug: Print what we found
+                        print(f"\n=== {filename} ===")
+                        for key, values in data.items():
+                            if values:
+                                print(f"{key}: {values}")
+                        
                         # Add to combined results
                         for key, values in data.items():
                             all_data[key].extend(values)
@@ -271,40 +277,44 @@ class QCProcessor:
         results = {}
         
         # 1. Contract Number
-        unique_contracts = list(set(all_data['contract_number']))
+        all_contracts = all_data['contract_number']
+        unique_contracts = list(set(all_contracts))
         if len(unique_contracts) == 1:
-            results['contract_number'] = {'status': 'PASS', 'value': unique_contracts[0], 'reason': 'Single contract number found'}
+            results['contract_number'] = {'status': 'PASS', 'value': unique_contracts[0], 'reason': f'All {len(all_contracts)} contract numbers match: {unique_contracts[0]}'}
         elif len(unique_contracts) > 1:
-            results['contract_number'] = {'status': 'FAIL', 'value': ', '.join(unique_contracts), 'reason': f'Multiple contract numbers found: {len(unique_contracts)}'}
+            results['contract_number'] = {'status': 'FAIL', 'value': f'Found: {", ".join(unique_contracts)}', 'reason': f'Multiple contract numbers found: {len(unique_contracts)} different values'}
         else:
-            results['contract_number'] = {'status': 'INFO', 'value': 'Not found', 'reason': 'No contract number found'}
+            results['contract_number'] = {'status': 'INFO', 'value': 'Not found', 'reason': 'No contract number found in any file'}
         
         # 2. Customer Name
-        unique_customers = list(set(all_data['customer_name']))
+        all_customers = all_data['customer_name']
+        unique_customers = list(set(all_customers))
         if len(unique_customers) == 1:
-            results['customer_name'] = {'status': 'PASS', 'value': unique_customers[0], 'reason': 'Single customer name found'}
+            results['customer_name'] = {'status': 'PASS', 'value': unique_customers[0], 'reason': f'All {len(all_customers)} customer names match: {unique_customers[0]}'}
         elif len(unique_customers) > 1:
-            results['customer_name'] = {'status': 'FAIL', 'value': ', '.join(unique_customers), 'reason': f'Multiple customer names found: {len(unique_customers)}'}
+            results['customer_name'] = {'status': 'FAIL', 'value': f'Found: {", ".join(unique_customers)}', 'reason': f'Multiple customer names found: {len(unique_customers)} different values'}
         else:
-            results['customer_name'] = {'status': 'INFO', 'value': 'Not found', 'reason': 'No customer name found'}
+            results['customer_name'] = {'status': 'INFO', 'value': 'Not found', 'reason': 'No customer name found in any file'}
         
         # 3. VIN Match
-        unique_vins = list(set(all_data['vin']))
+        all_vins = all_data['vin']
+        unique_vins = list(set(all_vins))
         if len(unique_vins) == 1:
-            results['vin_match'] = {'status': 'PASS', 'value': unique_vins[0], 'reason': 'Single VIN found'}
+            results['vin_match'] = {'status': 'PASS', 'value': unique_vins[0], 'reason': f'All {len(all_vins)} VINs match: {unique_vins[0]}'}
         elif len(unique_vins) > 1:
-            results['vin_match'] = {'status': 'FAIL', 'value': ', '.join(unique_vins), 'reason': f'Multiple VINs found: {len(unique_vins)}'}
+            results['vin_match'] = {'status': 'FAIL', 'value': f'Found: {", ".join(unique_vins)}', 'reason': f'Multiple VINs found: {len(unique_vins)} different values'}
         else:
-            results['vin_match'] = {'status': 'INFO', 'value': 'Not found', 'reason': 'No VIN found'}
+            results['vin_match'] = {'status': 'INFO', 'value': 'Not found', 'reason': 'No VIN found in any file'}
         
         # 4. Mileage Match
-        unique_mileages = list(set(all_data['mileage']))
+        all_mileages = all_data['mileage']
+        unique_mileages = list(set(all_mileages))
         if len(unique_mileages) == 1:
-            results['mileage_match'] = {'status': 'PASS', 'value': unique_mileages[0], 'reason': 'Single mileage found'}
+            results['mileage_match'] = {'status': 'PASS', 'value': unique_mileages[0], 'reason': f'All {len(all_mileages)} mileages match: {unique_mileages[0]}'}
         elif len(unique_mileages) > 1:
-            results['mileage_match'] = {'status': 'FAIL', 'value': ', '.join(unique_mileages), 'reason': f'Multiple mileages found: {len(unique_mileages)}'}
+            results['mileage_match'] = {'status': 'FAIL', 'value': f'Found: {", ".join(unique_mileages)}', 'reason': f'Multiple mileages found: {len(unique_mileages)} different values'}
         else:
-            results['mileage_match'] = {'status': 'INFO', 'value': 'Not found', 'reason': 'No mileage found'}
+            results['mileage_match'] = {'status': 'INFO', 'value': 'Not found', 'reason': 'No mileage found in any file'}
         
         # 5. 90+ Days Check
         cancellation_dates = all_data['cancellation_date']
@@ -355,22 +365,46 @@ class QCProcessor:
             results['ninety_days'] = {'status': 'INFO', 'value': 'Unknown', 'reason': 'No valid dates found'}
         
         # 6. Total Refund
-        if all_data['total_refund']:
-            results['total_refund'] = {'status': 'INFO', 'value': ', '.join(all_data['total_refund']), 'reason': f'Found {len(all_data["total_refund"])} refund amounts'}
+        all_refunds = all_data['total_refund']
+        if all_refunds:
+            results['total_refund'] = {'status': 'INFO', 'value': f'Found: {", ".join(all_refunds)}', 'reason': f'Found {len(all_refunds)} refund amounts'}
         else:
             results['total_refund'] = {'status': 'INFO', 'value': 'Not found', 'reason': 'No refund amounts found'}
         
         # 7. Dealer NCB
-        if all_data['dealer_ncb']:
-            results['dealer_ncb'] = {'status': 'INFO', 'value': ', '.join(all_data['dealer_ncb']), 'reason': f'Found {len(all_data["dealer_ncb"])} NCB references'}
+        all_ncb = all_data['dealer_ncb']
+        if all_ncb:
+            results['dealer_ncb'] = {'status': 'INFO', 'value': f'Found: {", ".join(all_ncb)}', 'reason': f'Found {len(all_ncb)} NCB references'}
         else:
             results['dealer_ncb'] = {'status': 'INFO', 'value': 'Not found', 'reason': 'No NCB references found'}
         
         # 8. No Chargeback
-        if all_data['no_chargeback']:
-            results['no_chargeback'] = {'status': 'INFO', 'value': ', '.join(all_data['no_chargeback']), 'reason': f'Found {len(all_data["no_chargeback"])} chargeback references'}
+        all_chargeback = all_data['no_chargeback']
+        if all_chargeback:
+            results['no_chargeback'] = {'status': 'INFO', 'value': f'Found: {", ".join(all_chargeback)}', 'reason': f'Found {len(all_chargeback)} chargeback references'}
         else:
             results['no_chargeback'] = {'status': 'INFO', 'value': 'Not found', 'reason': 'No chargeback references found'}
+        
+        # 9. Cancellation Dates
+        all_cancel_dates = all_data['cancellation_date']
+        if all_cancel_dates:
+            results['cancellation_dates'] = {'status': 'INFO', 'value': f'Found: {", ".join(all_cancel_dates)}', 'reason': f'Found {len(all_cancel_dates)} cancellation dates'}
+        else:
+            results['cancellation_dates'] = {'status': 'INFO', 'value': 'Not found', 'reason': 'No cancellation dates found'}
+        
+        # 10. Sale Dates
+        all_sale_dates = all_data['sale_date']
+        if all_sale_dates:
+            results['sale_dates'] = {'status': 'INFO', 'value': f'Found: {", ".join(all_sale_dates)}', 'reason': f'Found {len(all_sale_dates)} sale dates'}
+        else:
+            results['sale_dates'] = {'status': 'INFO', 'value': 'Not found', 'reason': 'No sale dates found'}
+        
+        # 11. Reasons
+        all_reasons = all_data['reason']
+        if all_reasons:
+            results['reasons'] = {'status': 'INFO', 'value': f'Found: {", ".join(all_reasons)}', 'reason': f'Found {len(all_reasons)} cancellation reasons'}
+        else:
+            results['reasons'] = {'status': 'INFO', 'value': 'Not found', 'reason': 'No cancellation reasons found'}
         
         return results
 
