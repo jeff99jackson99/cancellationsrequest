@@ -38,6 +38,8 @@ Thumbs.db
 # Streamlit
 .streamlit/secrets.toml
 
+# Temporary files for deployment
+
 # Test files
 test_*.py
 *_test.py
