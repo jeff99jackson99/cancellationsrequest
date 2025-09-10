@@ -107,13 +107,13 @@ class QCProcessor:
         
         # Contract number extraction
         contract_patterns = [
-            r'Contract[:\s]*#?\s*:?\s*([A-Z0-9]{6,20})',
-            r'Contract[:\s]*Number[:\s]*([A-Z0-9]{6,20})',
-            r'PN[:\s]*([A-Z0-9]{6,20})',
-            r'DL[:\s]*([A-Z0-9]{6,20})',
-            r'Policy[:\s]*#?\s*:?\s*([A-Z0-9]{6,20})',
-            r'Agreement[:\s]*#?\s*:?\s*([A-Z0-9]{6,20})',
-            r'#\s*([A-Z0-9]{6,20})'
+            r'Contract[:\s]*#?\s*:?\s*([A-Z0-9]{6,20})(?:\s|$|\n)',
+            r'Contract[:\s]*Number[:\s]*([A-Z0-9]{6,20})(?:\s|$|\n)',
+            r'PN[:\s]*([A-Z0-9]{6,20})(?:\s|$|\n)',
+            r'DL[:\s]*([A-Z0-9]{6,20})(?:\s|$|\n)',
+            r'Policy[:\s]*#?\s*:?\s*([A-Z0-9]{6,20})(?:\s|$|\n)',
+            r'Agreement[:\s]*#?\s*:?\s*([A-Z0-9]{6,20})(?:\s|$|\n)',
+            r'#\s*([A-Z0-9]{6,20})(?:\s|$|\n)'
         ]
         for pattern in contract_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
@@ -123,12 +123,12 @@ class QCProcessor:
         
         # Customer name extraction
         customer_patterns = [
-            r'Customer[:\s]*Name[:\s]*([A-Z][a-zA-Z\s]+)',
-            r'Name[:\s]*([A-Z][a-zA-Z\s]+)',
-            r'Buyer[:\s]*([A-Z][a-zA-Z\s]+)',
-            r'Purchaser[:\s]*([A-Z][a-zA-Z\s]+)',
-            r'Client[:\s]*Name[:\s]*([A-Z][a-zA-Z\s]+)',
-            r'Policyholder[:\s]*([A-Z][a-zA-Z\s]+)'
+            r'Customer[:\s]*Name[:\s]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})(?:\s|$|\n)',
+            r'Name[:\s]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})(?:\s|$|\n)',
+            r'Buyer[:\s]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})(?:\s|$|\n)',
+            r'Purchaser[:\s]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})(?:\s|$|\n)',
+            r'Client[:\s]*Name[:\s]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})(?:\s|$|\n)',
+            r'Policyholder[:\s]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})(?:\s|$|\n)'
         ]
         for pattern in customer_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
@@ -153,18 +153,18 @@ class QCProcessor:
         
         # Reason extraction
         reason_patterns = [
-            r'Reason[:\s]*([A-Za-z\s]+)',
-            r'Cancellation[:\s]*Reason[:\s]*([A-Za-z\s]+)',
-            r'Customer[:\s]*Request[:\s]*([A-Za-z\s]+)',
-            r'Why[:\s]*([A-Za-z\s]+)',
-            r'Cause[:\s]*([A-Za-z\s]+)',
-            r'Explanation[:\s]*([A-Za-z\s]+)'
+            r'Reason[:\s]*([A-Za-z]+(?:\s+[A-Za-z]+){0,2})(?:\s|$|\n)',
+            r'Cancellation[:\s]*Reason[:\s]*([A-Za-z]+(?:\s+[A-Za-z]+){0,2})(?:\s|$|\n)',
+            r'Customer[:\s]*Request[:\s]*([A-Za-z]+(?:\s+[A-Za-z]+){0,2})(?:\s|$|\n)',
+            r'Why[:\s]*([A-Za-z]+(?:\s+[A-Za-z]+){0,2})(?:\s|$|\n)',
+            r'Cause[:\s]*([A-Za-z]+(?:\s+[A-Za-z]+){0,2})(?:\s|$|\n)',
+            r'Explanation[:\s]*([A-Za-z]+(?:\s+[A-Za-z]+){0,2})(?:\s|$|\n)'
         ]
         for pattern in reason_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
             for match in matches:
                 clean_match = match.strip()
-                if len(clean_match.split()) >= 1 and len(clean_match.split()) <= 5:
+                if len(clean_match.split()) >= 1 and len(clean_match.split()) <= 3:
                     data['reason'].append(clean_match)
         
         # Mileage extraction
@@ -173,13 +173,15 @@ class QCProcessor:
             r'Mileage[:\s]*(\d{3,8})',
             r'(\d{1,3}(?:,\d{3})*)\s*miles?',
             r'(\d{3,8})\s*mi',
-            r'(\d{1,3}(?:,\d{3})*)\s*mi'
+            r'(\d{1,3}(?:,\d{3})*)\s*mi',
+            r'Odometer[:\s]*(\d{3,8})'
         ]
         for pattern in mileage_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
             for match in matches:
                 clean_match = re.sub(r'[^\d]', '', match)
-                if len(clean_match) >= 3 and len(clean_match) <= 8:
+                # Filter out years (1900-2030) and very short numbers
+                if len(clean_match) >= 3 and len(clean_match) <= 8 and not (1900 <= int(clean_match) <= 2030):
                     data['mileage'].append(clean_match)
         
         # Financial data extraction
@@ -192,7 +194,10 @@ class QCProcessor:
         ]
         for pattern in money_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
-            data['total_refund'].extend(matches)
+            for match in matches:
+                # Remove commas for consistent format
+                clean_match = match.replace(',', '')
+                data['total_refund'].append(clean_match)
         
         # NCB extraction
         ncb_patterns = [
