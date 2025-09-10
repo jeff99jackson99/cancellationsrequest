@@ -949,11 +949,15 @@ class CancellationProcessor:
         file_path = os.path.join(temp_dir, filename)
         file_ext = os.path.splitext(filename)[1].lower()
         
+        print(f"Creating thumbnail for {filename} at {file_path}")
+        print(f"File exists: {os.path.exists(file_path)}")
+        
         try:
             if file_ext in ['.png', '.jpg', '.jpeg', '.tiff', '.tif']:
                 # For images, create a thumbnail
                 image = Image.open(file_path)
                 image.thumbnail(size, Image.Resampling.LANCZOS)
+                print(f"Created image thumbnail for {filename}")
                 return image
             elif file_ext == '.pdf':
                 # For PDFs, create a simple icon
@@ -967,6 +971,7 @@ class CancellationProcessor:
                     font = None
                 draw.text((10, 10), "PDF", fill='red', font=font)
                 draw.text((10, 30), filename[:20], fill='black', font=font)
+                print(f"Created PDF thumbnail for {filename}")
                 return img
             elif file_ext in ['.docx', '.doc']:
                 # For Word docs, create a simple icon
@@ -979,6 +984,7 @@ class CancellationProcessor:
                     font = None
                 draw.text((10, 10), "DOC", fill='blue', font=font)
                 draw.text((10, 30), filename[:20], fill='black', font=font)
+                print(f"Created DOC thumbnail for {filename}")
                 return img
             elif file_ext == '.txt':
                 # For text files, create a simple icon
@@ -991,6 +997,7 @@ class CancellationProcessor:
                     font = None
                 draw.text((10, 10), "TXT", fill='green', font=font)
                 draw.text((10, 30), filename[:20], fill='black', font=font)
+                print(f"Created TXT thumbnail for {filename}")
                 return img
             else:
                 # Default icon for unknown file types
@@ -1003,6 +1010,7 @@ class CancellationProcessor:
                     font = None
                 draw.text((10, 10), "FILE", fill='black', font=font)
                 draw.text((10, 30), filename[:20], fill='black', font=font)
+                print(f"Created default thumbnail for {filename}")
                 return img
         except Exception as e:
             # Error thumbnail
@@ -1015,6 +1023,7 @@ class CancellationProcessor:
                 font = None
             draw.text((10, 10), "ERROR", fill='white', font=font)
             draw.text((10, 30), str(e)[:20], fill='white', font=font)
+            print(f"Error creating thumbnail for {filename}: {e}")
             return img
     
     def display_file_thumbnails(self, files_data, temp_dir):
@@ -1043,8 +1052,16 @@ class CancellationProcessor:
                     
                     with col:
                         # Create thumbnail
-                        thumbnail = self.create_thumbnail(file_data, temp_dir)
-                        st.image(thumbnail, caption=filename, use_container_width=True)
+                        try:
+                            thumbnail = self.create_thumbnail(file_data, temp_dir)
+                            if thumbnail:
+                                st.image(thumbnail, caption=filename, use_container_width=True)
+                            else:
+                                st.write("❌ Thumbnail creation failed")
+                        except Exception as e:
+                            st.write(f"❌ Error creating thumbnail: {e}")
+                            # Fallback: show file info without thumbnail
+                            st.write(f"📄 {filename}")
                         
                         # File info
                         st.write(f"**{filename}**")
