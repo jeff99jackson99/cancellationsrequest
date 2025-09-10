@@ -611,23 +611,52 @@ class CancellationProcessor:
         vin_pattern = r'\b([A-HJ-NPR-Z0-9]{17})\b'
         fields['vins'] = re.findall(vin_pattern, text.upper())
         
-        # Contract ID extraction
-        gap_pattern = r'\bGAP\d{8}\b'
-        common_prefix_pattern = r'\b(?:PN|EL|AD|OP|PT|PPM|EW|TW)\d{8}\b'
-        generic_contract_pattern = r'(?:Contract\s*(?:No\.?|Number)?|CN|Contract#)\s*[:#]?\s*([A-Z]{1,3}\d{6,})'
+        # Contract ID extraction - enhanced patterns
+        contract_patterns = [
+            r'\bGAP\d{8}\b',  # GAP format
+            r'\b(?:PN|EL|AD|OP|PT|PPM|EW|TW)\d{8}\b',  # Common prefixes
+            r'\b[A-Z]{1,3}\d{6,}\b',  # General format
+            r'(?:Contract\s*(?:No\.?|Number)?|CN|Contract#)\s*[:#]?\s*([A-Z]{1,3}\d{6,})',
+            r'(?:Contract|CN|Contract#)\s*[:#]?\s*([A-Z0-9]{8,})',
+            r'Contract\s*Number[:\s]*([A-Z0-9]+)',
+            r'Contract[:\s]*([A-Z0-9]+)',
+            r'CN[:\s]*([A-Z0-9]+)',
+            r'#([A-Z0-9]{8,})',  # Hash followed by contract
+        ]
         
         contracts = []
-        contracts.extend(re.findall(gap_pattern, text.upper()))
-        contracts.extend(re.findall(common_prefix_pattern, text.upper()))
-        contracts.extend(re.findall(generic_contract_pattern, text.upper()))
-        fields['contracts'] = list(set(contracts))  # Remove duplicates
+        for pattern in contract_patterns:
+            matches = re.findall(pattern, text.upper())
+            contracts.extend(matches)
+        
+        # Filter out obviously non-contract numbers
+        filtered_contracts = []
+        for contract in contracts:
+            contract = contract.strip()
+            # Must be at least 6 characters and contain both letters and numbers
+            if (len(contract) >= 6 and 
+                any(c.isalpha() for c in contract) and 
+                any(c.isdigit() for c in contract)):
+                filtered_contracts.append(contract)
+        
+        fields['contracts'] = list(set(filtered_contracts))  # Remove duplicates
         
         # Reason extraction - more comprehensive patterns
         reason_patterns = [
             r'(?:vehicle\s+traded|trade\s*in|sold|repossession|total\s*loss|dealer\s*buyback|customer\s*request)',
             r'(?:reason|cause)[:\s]+([^.\n]+)',
             r'(?:cancellation|cancel)[:\s]+(?:reason|cause)[:\s]+([^.\n]+)',
-            r'(?:why|because)[:\s]+([^.\n]+)'
+            r'(?:why|because)[:\s]+([^.\n]+)',
+            r'(?:cancellation\s+request|cancel\s+request)[:\s]*([^.\n]+)',
+            r'(?:customer\s+request|client\s+request)[:\s]*([^.\n]+)',
+            r'(?:loan\s+payoff|payoff)[:\s]*([^.\n]+)',
+            r'(?:repossession|repo)[:\s]*([^.\n]+)',
+            r'(?:total\s+loss|accident)[:\s]*([^.\n]+)',
+            r'(?:default|delinquent)[:\s]*([^.\n]+)',
+            r'(?:issued\s+in\s+error|error)[:\s]*([^.\n]+)',
+            r'(?:vehicle\s+sold|sold)[:\s]*([^.\n]+)',
+            r'(?:vehicle\s+stolen|stolen)[:\s]*([^.\n]+)',
+            r'(?:deal\s+unwound|unwound)[:\s]*([^.\n]+)',
         ]
         
         reasons = []
@@ -635,7 +664,9 @@ class CancellationProcessor:
             matches = re.findall(pattern, text, re.IGNORECASE)
             for match in matches:
                 reason = match.strip()
-                if len(reason) > 3 and not any(char.isdigit() for char in reason[:10]):
+                if (len(reason) > 3 and 
+                    not any(char.isdigit() for char in reason[:10]) and
+                    reason.lower() not in ['reason', 'cause', 'why', 'because', 'cancellation', 'cancel']):
                     reasons.append(reason)
         
         fields['reasons'] = list(set(reasons))  # Remove duplicates
@@ -749,19 +780,26 @@ class CancellationProcessor:
         
         fields['mileages'] = list(set(filtered_mileages))
         
-        # Customer name extraction
+        # Customer name extraction - enhanced patterns
         customer_patterns = [
             r'(?:customer|client|name)[:\s]+([A-Za-z\s]+?)(?:\n|$)',
-            r'(?:customer|client|name)[:\s]+([A-Za-z\s]+?)(?:\n|$)',
             r'Name[:\s]+([A-Za-z\s]+?)(?:\n|$)',
-            r'Customer[:\s]+([A-Za-z\s]+?)(?:\n|$)'
+            r'Customer[:\s]+([A-Za-z\s]+?)(?:\n|$)',
+            r'(?:first\s+name|last\s+name)[:\s]+([A-Za-z\s]+?)(?:\n|$)',
+            r'(?:buyer|purchaser)[:\s]+([A-Za-z\s]+?)(?:\n|$)',
+            r'(?:signature|signed\s+by)[:\s]+([A-Za-z\s]+?)(?:\n|$)',
+            r'([A-Z][a-z]+\s+[A-Z][a-z]+)',  # First Last format
+            r'([A-Z][a-z]+\s+[A-Z]\.\s*[A-Z][a-z]+)',  # First M. Last format
         ]
         
         for pattern in customer_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
             for match in matches:
                 name = match.strip()
-                if len(name) > 2 and not any(char.isdigit() for char in name):
+                # Enhanced filtering
+                if (len(name) > 2 and 
+                    not any(char.isdigit() for char in name) and
+                    name.lower() not in ['signature', 'customer', 'name', 'date', 'time', 'contract', 'vin', 'mileage', 'sale', 'effect']):
                     fields['customer_names'].append(name)
         
         # Flag detection with comprehensive patterns
