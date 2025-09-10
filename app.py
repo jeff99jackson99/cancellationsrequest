@@ -14,12 +14,12 @@ st.set_page_config(
     layout="wide"
 )
 
-class QCProcessor:
+class SimpleTextProcessor:
     def __init__(self):
         self.files_data = []
         
-    def extract_text_from_pdf(self, file_path):
-        """Extract text from PDF files"""
+    def convert_pdf_to_text(self, file_path):
+        """Convert PDF to plain text using pdfplumber"""
         try:
             with pdfplumber.open(file_path) as pdf:
                 text = ""
@@ -29,7 +29,7 @@ class QCProcessor:
                         text += page_text + "\n"
                 return text
         except Exception as e:
-            print(f"PDF extraction failed: {e}")
+            print(f"PDF to text conversion failed: {e}")
             return ""
     
     def extract_text_from_docx(self, file_path):
@@ -57,12 +57,12 @@ class QCProcessor:
             print(f"Image OCR failed: {e}")
             return ""
     
-    def extract_text_from_file(self, file_path):
-        """Extract text from any supported file type"""
+    def convert_file_to_text(self, file_path):
+        """Convert any file to plain text"""
         file_ext = Path(file_path).suffix.lower()
         
         if file_ext == '.pdf':
-            return self.extract_text_from_pdf(file_path)
+            return self.convert_pdf_to_text(file_path)
         elif file_ext == '.docx':
             return self.extract_text_from_docx(file_path)
         elif file_ext in ['.png', '.jpg', '.jpeg', '.tiff', '.tif']:
@@ -76,8 +76,8 @@ class QCProcessor:
         else:
             return ""
     
-    def extract_data(self, text, filename):
-        """Extract all relevant data from text"""
+    def extract_data_from_text(self, text, filename):
+        """Extract data from plain text using simple patterns"""
         data = {
             'vin': [],
             'contract_number': [],
@@ -89,132 +89,126 @@ class QCProcessor:
             'mileage': [],
             'total_refund': [],
             'dealer_ncb': [],
-            'no_chargeback': [],
-            'address': [],
-            'phone': [],
-            'email': []
+            'no_chargeback': []
         }
         
-        # VIN extraction
-        vin_patterns = [
-            r'\b([A-HJ-NPR-Z0-9]{17})\b',
-            r'VIN[:\s]*([A-HJ-NPR-Z0-9]{17})',
-            r'Vehicle[:\s]*ID[:\s]*([A-HJ-NPR-Z0-9]{17})'
-        ]
-        for pattern in vin_patterns:
-            matches = re.findall(pattern, text, re.IGNORECASE)
-            data['vin'].extend(matches)
+        # Clean up text - remove extra whitespace and normalize
+        text = re.sub(r'\s+', ' ', text)
         
-        # Contract number extraction
+        # VIN extraction - look for 17-character alphanumeric strings
+        vin_matches = re.findall(r'\b([A-HJ-NPR-Z0-9]{17})\b', text)
+        data['vin'] = list(set(vin_matches))
+        
+        # Contract number extraction - look for specific patterns
         contract_patterns = [
-            r'Contract[:\s]*#?\s*:?\s*([A-Z0-9]{6,20})(?:\s|$|\n)',
-            r'Contract[:\s]*Number[:\s]*([A-Z0-9]{6,20})(?:\s|$|\n)',
-            r'PN[:\s]*([A-Z0-9]{6,20})(?:\s|$|\n)',
-            r'DL[:\s]*([A-Z0-9]{6,20})(?:\s|$|\n)',
-            r'Policy[:\s]*#?\s*:?\s*([A-Z0-9]{6,20})(?:\s|$|\n)',
-            r'Agreement[:\s]*#?\s*:?\s*([A-Z0-9]{6,20})(?:\s|$|\n)',
-            r'#\s*([A-Z0-9]{6,20})(?:\s|$|\n)'
+            r'Contract[:\s]*#?\s*:?\s*([A-Z0-9]{6,20})',
+            r'Contract[:\s]*Number[:\s]*([A-Z0-9]{6,20})',
+            r'Policy[:\s]*#?\s*:?\s*([A-Z0-9]{6,20})',
+            r'Agreement[:\s]*#?\s*:?\s*([A-Z0-9]{6,20})',
+            r'#\s*([A-Z0-9]{6,20})'
         ]
+        filtered_contracts = []
         for pattern in contract_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
             for match in matches:
                 if len(match) >= 6 and len(match) <= 20 and match.isalnum():
-                    data['contract_number'].append(match)
+                    filtered_contracts.append(match)
+        data['contract_number'] = list(set(filtered_contracts))
         
-        # Customer name extraction
+        # Customer name extraction - look for specific patterns
         customer_patterns = [
-            r'Customer[:\s]*Name[:\s]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})(?:\s|$|\n)',
-            r'Name[:\s]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})(?:\s|$|\n)',
-            r'Buyer[:\s]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})(?:\s|$|\n)',
-            r'Purchaser[:\s]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})(?:\s|$|\n)',
-            r'Client[:\s]*Name[:\s]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})(?:\s|$|\n)',
-            r'Policyholder[:\s]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})(?:\s|$|\n)'
+            r'Customer[:\s]*Name[:\s]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})',
+            r'Name[:\s]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})',
+            r'Client[:\s]*Name[:\s]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})',
+            r'Purchaser[:\s]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})'
         ]
+        filtered_names = []
         for pattern in customer_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
             for match in matches:
-                clean_match = match.strip()
-                if len(clean_match.split()) >= 2 and len(clean_match.split()) <= 4:
-                    data['customer_name'].append(clean_match)
+                if len(match.split()) >= 2 and len(match.split()) <= 4:
+                    filtered_names.append(match)
+        data['customer_name'] = list(set(filtered_names))
         
-        # Date extraction
+        # Date extraction - look for various date formats
         date_patterns = [
-            r'(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})',
-            r'(\d{4}[/-]\d{1,2}[/-]\d{1,2})',
-            r'([A-Za-z]+ \d{1,2},? \d{4})',
-            r'(\d{1,2}\s+[A-Za-z]+\s+\d{4})',
-            r'([A-Za-z]+\s+\d{1,2},?\s+\d{4})'
+            r'\b(\d{1,2}/\d{1,2}/\d{2,4})\b',
+            r'\b(\d{4}-\d{1,2}-\d{1,2})\b',
+            r'\b([A-Za-z]+ \d{1,2},? \d{4})\b'
         ]
+        all_dates = []
         for pattern in date_patterns:
             matches = re.findall(pattern, text)
-            data['cancellation_date'].extend(matches)
-            data['sale_date'].extend(matches)
-            data['contract_date'].extend(matches)
+            all_dates.extend(matches)
+        data['cancellation_date'] = list(set(all_dates))
+        data['sale_date'] = list(set(all_dates))
+        data['contract_date'] = list(set(all_dates))
         
-        # Reason extraction
+        # Reason extraction - look for common cancellation reasons
         reason_patterns = [
-            r'Reason[:\s]*([A-Za-z]+(?:\s+[A-Za-z]+){0,2})(?:\s|$|\n)',
-            r'Cancellation[:\s]*Reason[:\s]*([A-Za-z]+(?:\s+[A-Za-z]+){0,2})(?:\s|$|\n)',
-            r'Customer[:\s]*Request[:\s]*([A-Za-z]+(?:\s+[A-Za-z]+){0,2})(?:\s|$|\n)',
-            r'Why[:\s]*([A-Za-z]+(?:\s+[A-Za-z]+){0,2})(?:\s|$|\n)',
-            r'Cause[:\s]*([A-Za-z]+(?:\s+[A-Za-z]+){0,2})(?:\s|$|\n)',
-            r'Explanation[:\s]*([A-Za-z]+(?:\s+[A-Za-z]+){0,2})(?:\s|$|\n)'
+            r'Reason[:\s]*([A-Za-z]+(?:\s+[A-Za-z]+){0,2})',
+            r'Why[:\s]*([A-Za-z]+(?:\s+[A-Za-z]+){0,2})',
+            r'Cause[:\s]*([A-Za-z]+(?:\s+[A-Za-z]+){0,2})'
         ]
+        all_reasons = []
         for pattern in reason_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
             for match in matches:
-                clean_match = match.strip()
-                if len(clean_match.split()) >= 1 and len(clean_match.split()) <= 3:
-                    data['reason'].append(clean_match)
+                if len(match.split()) <= 3:
+                    all_reasons.append(match)
+        data['reason'] = list(set(all_reasons))
         
-        # Mileage extraction
+        # Mileage extraction - look for numbers with "miles" or "mi"
         mileage_patterns = [
-            r'(\d{3,8})\s*miles?',
-            r'Mileage[:\s]*(\d{3,8})',
             r'(\d{1,3}(?:,\d{3})*)\s*miles?',
-            r'(\d{3,8})\s*mi',
             r'(\d{1,3}(?:,\d{3})*)\s*mi',
-            r'Odometer[:\s]*(\d{3,8})'
+            r'Mileage[:\s]*(\d{1,3}(?:,\d{3})*)',
+            r'Odometer[:\s]*(\d{1,3}(?:,\d{3})*)'
         ]
+        all_mileages = []
         for pattern in mileage_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
             for match in matches:
                 clean_match = re.sub(r'[^\d]', '', match)
-                # Filter out years (1900-2030) and very short numbers
-                if len(clean_match) >= 3 and len(clean_match) <= 8 and not (1900 <= int(clean_match) <= 2030):
-                    data['mileage'].append(clean_match)
+                if len(clean_match) >= 3 and len(clean_match) <= 8:
+                    all_mileages.append(clean_match)
+        data['mileage'] = list(set(all_mileages))
         
-        # Financial data extraction
+        # Financial data extraction - look for dollar amounts
         money_patterns = [
             r'\$(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)',
             r'(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)\s*dollars?',
-            r'Total[:\s]*Refund[:\s]*\$?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)',
-            r'Refund[:\s]*Amount[:\s]*\$?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)',
+            r'Refund[:\s]*\$?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)',
             r'Amount[:\s]*\$?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)'
         ]
+        all_refunds = []
         for pattern in money_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
             for match in matches:
-                # Remove commas for consistent format
                 clean_match = match.replace(',', '')
-                data['total_refund'].append(clean_match)
+                all_refunds.append(clean_match)
+        data['total_refund'] = list(set(all_refunds))
         
-        # NCB extraction
+        # NCB extraction - look for Yes/No values
         ncb_patterns = [
             r'NCB[:\s]*(Yes|No|Y|N)',
-            r'No[:\s]*Chargeback[:\s]*(Yes|No|Y|N)',
             r'Dealer[:\s]*NCB[:\s]*(Yes|No|Y|N)',
+            r'No[:\s]*Chargeback[:\s]*(Yes|No|Y|N)',
             r'Chargeback[:\s]*(Yes|No|Y|N)'
         ]
+        all_ncb = []
+        all_chargeback = []
         for pattern in ncb_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
-            data['dealer_ncb'].extend(matches)
-            data['no_chargeback'].extend(matches)
+            all_ncb.extend(matches)
+            all_chargeback.extend(matches)
+        data['dealer_ncb'] = list(set(all_ncb))
+        data['no_chargeback'] = list(set(all_chargeback))
         
         return data
     
     def process_zip(self, zip_file):
-        """Process uploaded ZIP file"""
+        """Process uploaded ZIP file - convert all files to text first"""
         with tempfile.TemporaryDirectory() as temp_dir:
             # Extract ZIP
             with zipfile.ZipFile(zip_file, 'r') as zip_ref:
@@ -232,10 +226,7 @@ class QCProcessor:
                 'mileage': [],
                 'total_refund': [],
                 'dealer_ncb': [],
-                'no_chargeback': [],
-                'address': [],
-                'phone': [],
-                'email': []
+                'no_chargeback': []
             }
             
             files_processed = []
@@ -245,14 +236,15 @@ class QCProcessor:
                     file_path = os.path.join(root, file)
                     filename = os.path.basename(file_path)
                     
-                    # Extract text
-                    text = self.extract_text_from_file(file_path)
+                    # Convert file to text
+                    text = self.convert_file_to_text(file_path)
                     if text:
-                        # Extract data
-                        data = self.extract_data(text, filename)
+                        # Extract data from text
+                        data = self.extract_data_from_text(text, filename)
                         
                         # Debug: Print what we found
                         print(f"\n=== {filename} ===")
+                        print(f"Text length: {len(text)} characters")
                         for key, values in data.items():
                             if values:
                                 print(f"{key}: {values}")
@@ -369,47 +361,13 @@ class QCProcessor:
         else:
             results['ninety_days'] = {'status': 'INFO', 'value': 'Unknown', 'reason': 'No valid dates found'}
         
-        # 6. Total Refund
-        all_refunds = all_data['total_refund']
-        if all_refunds:
-            results['total_refund'] = {'status': 'INFO', 'value': f'Found: {", ".join(all_refunds)}', 'reason': f'Found {len(all_refunds)} refund amounts'}
-        else:
-            results['total_refund'] = {'status': 'INFO', 'value': 'Not found', 'reason': 'No refund amounts found'}
-        
-        # 7. Dealer NCB
-        all_ncb = all_data['dealer_ncb']
-        if all_ncb:
-            results['dealer_ncb'] = {'status': 'INFO', 'value': f'Found: {", ".join(all_ncb)}', 'reason': f'Found {len(all_ncb)} NCB references'}
-        else:
-            results['dealer_ncb'] = {'status': 'INFO', 'value': 'Not found', 'reason': 'No NCB references found'}
-        
-        # 8. No Chargeback
-        all_chargeback = all_data['no_chargeback']
-        if all_chargeback:
-            results['no_chargeback'] = {'status': 'INFO', 'value': f'Found: {", ".join(all_chargeback)}', 'reason': f'Found {len(all_chargeback)} chargeback references'}
-        else:
-            results['no_chargeback'] = {'status': 'INFO', 'value': 'Not found', 'reason': 'No chargeback references found'}
-        
-        # 9. Cancellation Dates
-        all_cancel_dates = all_data['cancellation_date']
-        if all_cancel_dates:
-            results['cancellation_dates'] = {'status': 'INFO', 'value': f'Found: {", ".join(all_cancel_dates)}', 'reason': f'Found {len(all_cancel_dates)} cancellation dates'}
-        else:
-            results['cancellation_dates'] = {'status': 'INFO', 'value': 'Not found', 'reason': 'No cancellation dates found'}
-        
-        # 10. Sale Dates
-        all_sale_dates = all_data['sale_date']
-        if all_sale_dates:
-            results['sale_dates'] = {'status': 'INFO', 'value': f'Found: {", ".join(all_sale_dates)}', 'reason': f'Found {len(all_sale_dates)} sale dates'}
-        else:
-            results['sale_dates'] = {'status': 'INFO', 'value': 'Not found', 'reason': 'No sale dates found'}
-        
-        # 11. Reasons
-        all_reasons = all_data['reason']
-        if all_reasons:
-            results['reasons'] = {'status': 'INFO', 'value': f'Found: {", ".join(all_reasons)}', 'reason': f'Found {len(all_reasons)} cancellation reasons'}
-        else:
-            results['reasons'] = {'status': 'INFO', 'value': 'Not found', 'reason': 'No cancellation reasons found'}
+        # Other fields
+        results['total_refund'] = {'status': 'INFO', 'value': f'Found: {", ".join(all_data["total_refund"])}' if all_data['total_refund'] else 'Not found', 'reason': f'Found {len(all_data["total_refund"])} refund amounts'}
+        results['dealer_ncb'] = {'status': 'INFO', 'value': f'Found: {", ".join(all_data["dealer_ncb"])}' if all_data['dealer_ncb'] else 'Not found', 'reason': f'Found {len(all_data["dealer_ncb"])} NCB references'}
+        results['no_chargeback'] = {'status': 'INFO', 'value': f'Found: {", ".join(all_data["no_chargeback"])}' if all_data['no_chargeback'] else 'Not found', 'reason': f'Found {len(all_data["no_chargeback"])} chargeback references'}
+        results['cancellation_dates'] = {'status': 'INFO', 'value': f'Found: {", ".join(all_data["cancellation_date"])}' if all_data['cancellation_date'] else 'Not found', 'reason': f'Found {len(all_data["cancellation_date"])} cancellation dates'}
+        results['sale_dates'] = {'status': 'INFO', 'value': f'Found: {", ".join(all_data["sale_date"])}' if all_data['sale_date'] else 'Not found', 'reason': f'Found {len(all_data["sale_date"])} sale dates'}
+        results['reasons'] = {'status': 'INFO', 'value': f'Found: {", ".join(all_data["reason"])}' if all_data['reason'] else 'Not found', 'reason': f'Found {len(all_data["reason"])} cancellation reasons'}
         
         return results
 
@@ -425,7 +383,7 @@ def main():
     )
     
     if uploaded_file is not None:
-        processor = QCProcessor()
+        processor = SimpleTextProcessor()
         
         with st.spinner("Processing files..."):
             # Process ZIP
