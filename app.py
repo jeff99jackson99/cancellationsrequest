@@ -15,6 +15,12 @@ import io
 import requests
 import ipaddress
 try:
+    from pdf2image import convert_from_path
+    PDF2IMAGE_AVAILABLE = True
+except ImportError:
+    PDF2IMAGE_AVAILABLE = False
+    print("pdf2image not available - PDF thumbnails will use fallback icons")
+try:
     import cv2
     import numpy as np
     OPENCV_AVAILABLE = True
@@ -1094,18 +1100,32 @@ class CancellationProcessor:
                 print(f"Created image thumbnail for {filename}")
                 return image
             elif file_ext == '.pdf':
-                # For PDFs, create a simple icon
+                # For PDFs, convert first page to image if pdf2image is available
+                if PDF2IMAGE_AVAILABLE:
+                    try:
+                        # Convert PDF to image (first page only)
+                        images = convert_from_path(file_path, first_page=1, last_page=1, dpi=150)
+                        if images:
+                            # Get the first page image
+                            pdf_image = images[0]
+                            # Create thumbnail
+                            pdf_image.thumbnail(size, Image.Resampling.LANCZOS)
+                            print(f"Created PDF thumbnail for {filename}")
+                            return pdf_image
+                    except Exception as e:
+                        print(f"PDF conversion failed for {filename}: {e}")
+                
+                # Fallback to simple icon (either pdf2image not available or conversion failed)
                 from PIL import ImageDraw, ImageFont
                 img = Image.new('RGB', size, color='white')
                 draw = ImageDraw.Draw(img)
                 try:
-                    # Try to use a default font
                     font = ImageFont.load_default()
                 except:
                     font = None
                 draw.text((10, 10), "PDF", fill='red', font=font)
                 draw.text((10, 30), filename[:20], fill='black', font=font)
-                print(f"Created PDF thumbnail for {filename}")
+                print(f"Created PDF fallback icon for {filename}")
                 return img
             elif file_ext in ['.docx', '.doc']:
                 # For Word docs, create a simple icon
