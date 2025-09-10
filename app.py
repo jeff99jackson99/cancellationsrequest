@@ -14,12 +14,12 @@ st.set_page_config(
     layout="wide"
 )
 
-class SimpleCancellationProcessor:
+class QCProcessor:
     def __init__(self):
         self.files_data = []
         
     def extract_text_from_pdf(self, file_path):
-        """Simple PDF text extraction"""
+        """Extract text from PDF files"""
         try:
             with pdfplumber.open(file_path) as pdf:
                 text = ""
@@ -76,51 +76,52 @@ class SimpleCancellationProcessor:
         else:
             return ""
     
-    def extract_fields(self, text, filename):
-        """Extract key fields from text with better patterns"""
-        fields = {
+    def extract_data(self, text, filename):
+        """Extract all relevant data from text"""
+        data = {
             'vin': [],
-            'contract': [],
+            'contract_number': [],
             'customer_name': [],
             'cancellation_date': [],
             'sale_date': [],
+            'contract_date': [],
             'reason': [],
             'mileage': [],
             'total_refund': [],
             'dealer_ncb': [],
-            'no_chargeback': []
+            'no_chargeback': [],
+            'address': [],
+            'phone': [],
+            'email': []
         }
         
-        # VIN patterns - more flexible
+        # VIN extraction
         vin_patterns = [
             r'\b([A-HJ-NPR-Z0-9]{17})\b',
             r'VIN[:\s]*([A-HJ-NPR-Z0-9]{17})',
-            r'Vehicle[:\s]*ID[:\s]*([A-HJ-NPR-Z0-9]{17})',
-            r'VIN[:\s]*([A-HJ-NPR-Z0-9]{17})',
-            r'([A-HJ-NPR-Z0-9]{17})'
+            r'Vehicle[:\s]*ID[:\s]*([A-HJ-NPR-Z0-9]{17})'
         ]
         for pattern in vin_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
-            fields['vin'].extend(matches)
+            data['vin'].extend(matches)
         
-        # Contract patterns - more flexible
+        # Contract number extraction
         contract_patterns = [
             r'Contract[:\s]*#?\s*:?\s*([A-Z0-9]{6,20})',
             r'Contract[:\s]*Number[:\s]*([A-Z0-9]{6,20})',
             r'PN[:\s]*([A-Z0-9]{6,20})',
             r'DL[:\s]*([A-Z0-9]{6,20})',
-            r'#\s*([A-Z0-9]{6,20})',
             r'Policy[:\s]*#?\s*:?\s*([A-Z0-9]{6,20})',
             r'Agreement[:\s]*#?\s*:?\s*([A-Z0-9]{6,20})',
-            r'([A-Z0-9]{8,15})'  # Generic pattern for any alphanumeric 8-15 chars
+            r'#\s*([A-Z0-9]{6,20})'
         ]
         for pattern in contract_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
             for match in matches:
                 if len(match) >= 6 and len(match) <= 20 and match.isalnum():
-                    fields['contract'].append(match)
+                    data['contract_number'].append(match)
         
-        # Customer name patterns - more flexible
+        # Customer name extraction
         customer_patterns = [
             r'Customer[:\s]*Name[:\s]*([A-Z][a-zA-Z\s]+)',
             r'Name[:\s]*([A-Z][a-zA-Z\s]+)',
@@ -134,9 +135,9 @@ class SimpleCancellationProcessor:
             for match in matches:
                 clean_match = match.strip()
                 if len(clean_match.split()) >= 2 and len(clean_match.split()) <= 4:
-                    fields['customer_name'].append(clean_match)
+                    data['customer_name'].append(clean_match)
         
-        # Date patterns - more comprehensive
+        # Date extraction
         date_patterns = [
             r'(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})',
             r'(\d{4}[/-]\d{1,2}[/-]\d{1,2})',
@@ -146,10 +147,11 @@ class SimpleCancellationProcessor:
         ]
         for pattern in date_patterns:
             matches = re.findall(pattern, text)
-            fields['cancellation_date'].extend(matches)
-            fields['sale_date'].extend(matches)
+            data['cancellation_date'].extend(matches)
+            data['sale_date'].extend(matches)
+            data['contract_date'].extend(matches)
         
-        # Reason patterns - more flexible
+        # Reason extraction
         reason_patterns = [
             r'Reason[:\s]*([A-Za-z\s]+)',
             r'Cancellation[:\s]*Reason[:\s]*([A-Za-z\s]+)',
@@ -163,9 +165,9 @@ class SimpleCancellationProcessor:
             for match in matches:
                 clean_match = match.strip()
                 if len(clean_match.split()) >= 1 and len(clean_match.split()) <= 5:
-                    fields['reason'].append(clean_match)
+                    data['reason'].append(clean_match)
         
-        # Mileage patterns - more flexible
+        # Mileage extraction
         mileage_patterns = [
             r'(\d{3,8})\s*miles?',
             r'Mileage[:\s]*(\d{3,8})',
@@ -178,9 +180,9 @@ class SimpleCancellationProcessor:
             for match in matches:
                 clean_match = re.sub(r'[^\d]', '', match)
                 if len(clean_match) >= 3 and len(clean_match) <= 8:
-                    fields['mileage'].append(clean_match)
+                    data['mileage'].append(clean_match)
         
-        # Financial patterns - more comprehensive
+        # Financial data extraction
         money_patterns = [
             r'\$(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)',
             r'(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)\s*dollars?',
@@ -190,9 +192,9 @@ class SimpleCancellationProcessor:
         ]
         for pattern in money_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
-            fields['total_refund'].extend(matches)
+            data['total_refund'].extend(matches)
         
-        # NCB patterns - more comprehensive
+        # NCB extraction
         ncb_patterns = [
             r'NCB[:\s]*(Yes|No|Y|N)',
             r'No[:\s]*Chargeback[:\s]*(Yes|No|Y|N)',
@@ -201,10 +203,10 @@ class SimpleCancellationProcessor:
         ]
         for pattern in ncb_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
-            fields['dealer_ncb'].extend(matches)
-            fields['no_chargeback'].extend(matches)
+            data['dealer_ncb'].extend(matches)
+            data['no_chargeback'].extend(matches)
         
-        return fields
+        return data
     
     def process_zip(self, zip_file):
         """Process uploaded ZIP file"""
@@ -214,17 +216,21 @@ class SimpleCancellationProcessor:
                 zip_ref.extractall(temp_dir)
             
             # Process each file
-            all_fields = {
+            all_data = {
                 'vin': [],
-                'contract': [],
+                'contract_number': [],
                 'customer_name': [],
                 'cancellation_date': [],
                 'sale_date': [],
+                'contract_date': [],
                 'reason': [],
                 'mileage': [],
                 'total_refund': [],
                 'dealer_ncb': [],
-                'no_chargeback': []
+                'no_chargeback': [],
+                'address': [],
+                'phone': [],
+                'email': []
             }
             
             files_processed = []
@@ -237,18 +243,12 @@ class SimpleCancellationProcessor:
                     # Extract text
                     text = self.extract_text_from_file(file_path)
                     if text:
-                        # Extract fields
-                        fields = self.extract_fields(text, filename)
-                        
-                        # Debug: Print what we found
-                        print(f"\n=== {filename} ===")
-                        for key, values in fields.items():
-                            if values:
-                                print(f"{key}: {values}")
+                        # Extract data
+                        data = self.extract_data(text, filename)
                         
                         # Add to combined results
-                        for key, values in fields.items():
-                            all_fields[key].extend(values)
+                        for key, values in data.items():
+                            all_data[key].extend(values)
                         
                         # Read file data for download
                         try:
@@ -259,44 +259,118 @@ class SimpleCancellationProcessor:
                         
                         files_processed.append({
                             'filename': filename,
-                            'fields': fields,
+                            'data': data,
                             'text_length': len(text),
                             'file_data': file_data
                         })
             
-            return all_fields, files_processed
+            return all_data, files_processed
     
-    def check_matches(self, all_fields):
-        """Check for matches and conflicts"""
+    def evaluate_qc_checklist(self, all_data, files_processed):
+        """Evaluate against QC checklist"""
         results = {}
         
-        # VIN match
-        unique_vins = list(set(all_fields['vin']))
-        results['vin_match'] = 'PASS' if len(unique_vins) == 1 else 'FAIL' if len(unique_vins) > 1 else 'INFO'
-        results['vin_values'] = unique_vins
+        # 1. Contract Number
+        unique_contracts = list(set(all_data['contract_number']))
+        if len(unique_contracts) == 1:
+            results['contract_number'] = {'status': 'PASS', 'value': unique_contracts[0], 'reason': 'Single contract number found'}
+        elif len(unique_contracts) > 1:
+            results['contract_number'] = {'status': 'FAIL', 'value': ', '.join(unique_contracts), 'reason': f'Multiple contract numbers found: {len(unique_contracts)}'}
+        else:
+            results['contract_number'] = {'status': 'INFO', 'value': 'Not found', 'reason': 'No contract number found'}
         
-        # Contract match
-        unique_contracts = list(set(all_fields['contract']))
-        results['contract_match'] = 'PASS' if len(unique_contracts) == 1 else 'FAIL' if len(unique_contracts) > 1 else 'INFO'
-        results['contract_values'] = unique_contracts
+        # 2. Customer Name
+        unique_customers = list(set(all_data['customer_name']))
+        if len(unique_customers) == 1:
+            results['customer_name'] = {'status': 'PASS', 'value': unique_customers[0], 'reason': 'Single customer name found'}
+        elif len(unique_customers) > 1:
+            results['customer_name'] = {'status': 'FAIL', 'value': ', '.join(unique_customers), 'reason': f'Multiple customer names found: {len(unique_customers)}'}
+        else:
+            results['customer_name'] = {'status': 'INFO', 'value': 'Not found', 'reason': 'No customer name found'}
         
-        # Customer name match
-        unique_customers = list(set(all_fields['customer_name']))
-        results['customer_match'] = 'PASS' if len(unique_customers) == 1 else 'FAIL' if len(unique_customers) > 1 else 'INFO'
-        results['customer_values'] = unique_customers
+        # 3. VIN Match
+        unique_vins = list(set(all_data['vin']))
+        if len(unique_vins) == 1:
+            results['vin_match'] = {'status': 'PASS', 'value': unique_vins[0], 'reason': 'Single VIN found'}
+        elif len(unique_vins) > 1:
+            results['vin_match'] = {'status': 'FAIL', 'value': ', '.join(unique_vins), 'reason': f'Multiple VINs found: {len(unique_vins)}'}
+        else:
+            results['vin_match'] = {'status': 'INFO', 'value': 'Not found', 'reason': 'No VIN found'}
         
-        # Mileage match
-        unique_mileages = list(set(all_fields['mileage']))
-        results['mileage_match'] = 'PASS' if len(unique_mileages) == 1 else 'FAIL' if len(unique_mileages) > 1 else 'INFO'
-        results['mileage_values'] = unique_mileages
+        # 4. Mileage Match
+        unique_mileages = list(set(all_data['mileage']))
+        if len(unique_mileages) == 1:
+            results['mileage_match'] = {'status': 'PASS', 'value': unique_mileages[0], 'reason': 'Single mileage found'}
+        elif len(unique_mileages) > 1:
+            results['mileage_match'] = {'status': 'FAIL', 'value': ', '.join(unique_mileages), 'reason': f'Multiple mileages found: {len(unique_mileages)}'}
+        else:
+            results['mileage_match'] = {'status': 'INFO', 'value': 'Not found', 'reason': 'No mileage found'}
         
-        # Other fields
-        results['cancellation_dates'] = list(set(all_fields['cancellation_date']))
-        results['sale_dates'] = list(set(all_fields['sale_date']))
-        results['reasons'] = list(set(all_fields['reason']))
-        results['total_refunds'] = list(set(all_fields['total_refund']))
-        results['dealer_ncb'] = list(set(all_fields['dealer_ncb']))
-        results['no_chargeback'] = list(set(all_fields['no_chargeback']))
+        # 5. 90+ Days Check
+        cancellation_dates = all_data['cancellation_date']
+        sale_dates = all_data['sale_date']
+        contract_dates = all_data['contract_date']
+        
+        if cancellation_dates and (sale_dates or contract_dates):
+            # Use sale date first, fallback to contract date
+            reference_dates = sale_dates if sale_dates else contract_dates
+            try:
+                # Parse cancellation date
+                cancel_date = None
+                for date_str in cancellation_dates:
+                    try:
+                        cancel_date = datetime.strptime(date_str, '%m/%d/%Y')
+                        break
+                    except:
+                        try:
+                            cancel_date = datetime.strptime(date_str, '%Y-%m-%d')
+                            break
+                        except:
+                            continue
+                
+                # Parse reference date
+                ref_date = None
+                for date_str in reference_dates:
+                    try:
+                        ref_date = datetime.strptime(date_str, '%m/%d/%Y')
+                        break
+                    except:
+                        try:
+                            ref_date = datetime.strptime(date_str, '%Y-%m-%d')
+                            break
+                        except:
+                            continue
+                
+                if cancel_date and ref_date:
+                    days_diff = (cancel_date - ref_date).days
+                    if days_diff > 90:
+                        results['ninety_days'] = {'status': 'PASS', 'value': f'{days_diff} days', 'reason': f'Cancellation is {days_diff} days after reference date'}
+                    else:
+                        results['ninety_days'] = {'status': 'FAIL', 'value': f'{days_diff} days', 'reason': f'Cancellation is only {days_diff} days after reference date (needs 90+)'}
+                else:
+                    results['ninety_days'] = {'status': 'INFO', 'value': 'Unknown', 'reason': 'Could not parse dates'}
+            except:
+                results['ninety_days'] = {'status': 'INFO', 'value': 'Unknown', 'reason': 'Date parsing error'}
+        else:
+            results['ninety_days'] = {'status': 'INFO', 'value': 'Unknown', 'reason': 'No valid dates found'}
+        
+        # 6. Total Refund
+        if all_data['total_refund']:
+            results['total_refund'] = {'status': 'INFO', 'value': ', '.join(all_data['total_refund']), 'reason': f'Found {len(all_data["total_refund"])} refund amounts'}
+        else:
+            results['total_refund'] = {'status': 'INFO', 'value': 'Not found', 'reason': 'No refund amounts found'}
+        
+        # 7. Dealer NCB
+        if all_data['dealer_ncb']:
+            results['dealer_ncb'] = {'status': 'INFO', 'value': ', '.join(all_data['dealer_ncb']), 'reason': f'Found {len(all_data["dealer_ncb"])} NCB references'}
+        else:
+            results['dealer_ncb'] = {'status': 'INFO', 'value': 'Not found', 'reason': 'No NCB references found'}
+        
+        # 8. No Chargeback
+        if all_data['no_chargeback']:
+            results['no_chargeback'] = {'status': 'INFO', 'value': ', '.join(all_data['no_chargeback']), 'reason': f'Found {len(all_data["no_chargeback"])} chargeback references'}
+        else:
+            results['no_chargeback'] = {'status': 'INFO', 'value': 'Not found', 'reason': 'No chargeback references found'}
         
         return results
 
@@ -312,14 +386,14 @@ def main():
     )
     
     if uploaded_file is not None:
-        processor = SimpleCancellationProcessor()
+        processor = QCProcessor()
         
         with st.spinner("Processing files..."):
             # Process ZIP
-            all_fields, files_processed = processor.process_zip(uploaded_file)
+            all_data, files_processed = processor.process_zip(uploaded_file)
             
-            # Check matches
-            results = processor.check_matches(all_fields)
+            # Evaluate QC checklist
+            qc_results = processor.evaluate_qc_checklist(all_data, files_processed)
         
         # Display results
         st.success(f"✅ Processed {len(files_processed)} file(s)")
@@ -329,92 +403,35 @@ def main():
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            st.metric("VINs Found", len(all_fields['vin']))
-            st.metric("Contracts Found", len(all_fields['contract']))
+            st.metric("VINs Found", len(all_data['vin']))
+            st.metric("Contracts Found", len(all_data['contract_number']))
         
         with col2:
-            st.metric("Customer Names", len(all_fields['customer_name']))
-            st.metric("Reasons Found", len(all_fields['reason']))
+            st.metric("Customer Names", len(all_data['customer_name']))
+            st.metric("Reasons Found", len(all_data['reason']))
         
         with col3:
-            st.metric("Cancellation Dates", len(all_fields['cancellation_date']))
-            st.metric("Sale Dates Found", len(all_fields['sale_date']))
+            st.metric("Cancellation Dates", len(all_data['cancellation_date']))
+            st.metric("Sale Dates Found", len(all_data['sale_date']))
         
         with col4:
-            st.metric("Mileages Found", len(all_fields['mileage']))
+            st.metric("Mileages Found", len(all_data['mileage']))
             st.metric("Files Processed", len(files_processed))
         
-        # QC Results
+        # QC Checklist Results
         st.subheader("📋 QC Checklist Results")
         
         # Create results DataFrame
         qc_data = []
         
-        # VIN
-        status_color = {'PASS': '🟢', 'FAIL': '🔴', 'INFO': '🟡'}
-        qc_data.append({
-            'Field': 'VIN Match',
-            'Status': f"{status_color[results['vin_match']]} {results['vin_match']}",
-            'Values': ', '.join(results['vin_values']) if results['vin_values'] else 'Not found'
-        })
-        
-        # Contract
-        qc_data.append({
-            'Field': 'Contract Match',
-            'Status': f"{status_color[results['contract_match']]} {results['contract_match']}",
-            'Values': ', '.join(results['contract_values']) if results['contract_values'] else 'Not found'
-        })
-        
-        # Customer Name
-        qc_data.append({
-            'Field': 'Customer Name',
-            'Status': f"{status_color[results['customer_match']]} {results['customer_match']}",
-            'Values': ', '.join(results['customer_values']) if results['customer_values'] else 'Not found'
-        })
-        
-        # Mileage
-        qc_data.append({
-            'Field': 'Mileage Match',
-            'Status': f"{status_color[results['mileage_match']]} {results['mileage_match']}",
-            'Values': ', '.join(results['mileage_values']) if results['mileage_values'] else 'Not found'
-        })
-        
-        # Other fields
-        qc_data.append({
-            'Field': 'Cancellation Dates',
-            'Status': 'INFO',
-            'Values': ', '.join(results['cancellation_dates']) if results['cancellation_dates'] else 'Not found'
-        })
-        
-        qc_data.append({
-            'Field': 'Sale Dates',
-            'Status': 'INFO',
-            'Values': ', '.join(results['sale_dates']) if results['sale_dates'] else 'Not found'
-        })
-        
-        qc_data.append({
-            'Field': 'Reasons',
-            'Status': 'INFO',
-            'Values': ', '.join(results['reasons']) if results['reasons'] else 'Not found'
-        })
-        
-        qc_data.append({
-            'Field': 'Total Refund',
-            'Status': 'INFO',
-            'Values': ', '.join(results['total_refunds']) if results['total_refunds'] else 'Not found'
-        })
-        
-        qc_data.append({
-            'Field': 'Dealer NCB',
-            'Status': 'INFO',
-            'Values': ', '.join(results['dealer_ncb']) if results['dealer_ncb'] else 'Not found'
-        })
-        
-        qc_data.append({
-            'Field': 'No Chargeback',
-            'Status': 'INFO',
-            'Values': ', '.join(results['no_chargeback']) if results['no_chargeback'] else 'Not found'
-        })
+        for field, result in qc_results.items():
+            status_color = {'PASS': '🟢', 'FAIL': '🔴', 'INFO': '🟡'}
+            qc_data.append({
+                'Field': field.replace('_', ' ').title(),
+                'Status': f"{status_color[result['status']]} {result['status']}",
+                'Value': result['value'],
+                'Reason': result['reason']
+            })
         
         # Display results table
         df = pd.DataFrame(qc_data)
