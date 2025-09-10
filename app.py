@@ -254,7 +254,7 @@ class PreciseTextProcessor:
         data['sale_date'] = list(set(dates))
         data['contract_date'] = list(set(dates))
         
-        # Reason extraction - ONLY with specific labels
+        # Reason extraction - ONLY with specific labels, get ONE clear reason
         reason_patterns = [
             r'Reason[:\s]*([A-Za-z]+(?:\s+[A-Za-z]+){0,2})',
             r'(Customer\s+Request)',
@@ -270,7 +270,12 @@ class PreciseTextProcessor:
             for match in matches:
                 if len(match.split()) <= 3 and len(match) > 3:
                     reasons.append(match)
-        data['reason'] = list(set(reasons))
+        
+        # Only keep the first clear reason found
+        if reasons:
+            data['reason'] = [reasons[0]]
+        else:
+            data['reason'] = []
         
         # Mileage extraction - ONLY with specific labels and realistic values
         mileage_patterns = [
@@ -532,32 +537,36 @@ class PreciseTextProcessor:
             # Use sale date first, fallback to contract date
             reference_dates = sale_dates if sale_dates else contract_dates
             try:
-                # Parse cancellation date
-                cancel_date = None
+                # Parse cancellation date - use the most recent one
+                cancel_dates = []
                 for date_str in cancellation_dates:
-                    cancel_date = self.parse_date(date_str)
-                    if cancel_date:
-                        break
+                    parsed_date = self.parse_date(date_str)
+                    if parsed_date:
+                        cancel_dates.append(parsed_date)
                 
-                # Parse reference date
-                ref_date = None
+                # Parse reference date - use the earliest one
+                ref_dates = []
                 for date_str in reference_dates:
-                    ref_date = self.parse_date(date_str)
-                    if ref_date:
-                        break
+                    parsed_date = self.parse_date(date_str)
+                    if parsed_date:
+                        ref_dates.append(parsed_date)
                 
-                if cancel_date and ref_date:
+                if cancel_dates and ref_dates:
+                    # Use the most recent cancellation date and earliest reference date
+                    cancel_date = max(cancel_dates)
+                    ref_date = min(ref_dates)
+                    
                     days_diff = (cancel_date - ref_date).days
                     if days_diff >= 90:
                         results['ninety_days'] = {'status': 'PASS', 'value': f'{days_diff} days', 'reason': f'Cancellation is {days_diff} days after reference date'}
                     else:
-                        results['ninety_days'] = {'status': 'INFO', 'value': f'{days_diff} days', 'reason': f'Cancellation is {days_diff} days after reference date (less than 90 days)'}
+                        results['ninety_days'] = {'status': 'FAIL', 'value': f'{days_diff} days', 'reason': f'Cancellation is only {days_diff} days after reference date (less than 90 days)'}
                 else:
                     results['ninety_days'] = {'status': 'FAIL', 'value': 'Unknown', 'reason': 'Could not parse dates for calculation'}
             except Exception as e:
                 results['ninety_days'] = {'status': 'FAIL', 'value': 'Unknown', 'reason': f'Date parsing error: {str(e)}'}
         else:
-            results['ninety_days'] = {'status': 'INFO', 'value': 'Unknown', 'reason': 'No valid dates found'}
+            results['ninety_days'] = {'status': 'FAIL', 'value': 'Unknown', 'reason': 'No valid dates found'}
         
         # 6. Total Refund - must match across all files
         all_refunds = all_data['total_refund']
