@@ -105,6 +105,7 @@ class SimpleTextProcessor:
             r'Contract[:\s]*Number[:\s]*([A-Z0-9]{6,20})',
             r'Policy[:\s]*#?\s*:?\s*([A-Z0-9]{6,20})',
             r'Agreement[:\s]*#?\s*:?\s*([A-Z0-9]{6,20})',
+            r'PN[:\s]*([A-Z0-9]{6,20})',
             r'#\s*([A-Z0-9]{6,20})'
         ]
         filtered_contracts = []
@@ -112,7 +113,9 @@ class SimpleTextProcessor:
             matches = re.findall(pattern, text, re.IGNORECASE)
             for match in matches:
                 if len(match) >= 6 and len(match) <= 20 and match.isalnum():
-                    filtered_contracts.append(match)
+                    # Filter out common words
+                    if not re.match(r'^(Effective|Information|Cancel|Number|Request|Form|Letter|Screenshot|System|Generated|Data|Contract|Agreement|Service|Policy|Client|Customer|Vehicle|Identification|Purchaser|Terms|Conditions|Apply|Additional|Notes|Moving|State|Approved|Date|Reason|Mileage|Amount|Status|Required|Eligible|Calculation|Reading|Current|Original|Lender|PCMI|Partial|Inconsistent|Slightly|Different|Formatting)$', match, re.IGNORECASE):
+                        filtered_contracts.append(match)
         data['contract_number'] = list(set(filtered_contracts))
         
         # Customer name extraction - look for specific patterns
@@ -126,8 +129,19 @@ class SimpleTextProcessor:
         for pattern in customer_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
             for match in matches:
-                if len(match.split()) >= 2 and len(match.split()) <= 4:
-                    filtered_names.append(match)
+                # Clean up the match - remove extra words
+                clean_match = match.strip()
+                # Split and take only the first 2-3 words (first and last name)
+                words = clean_match.split()
+                if len(words) >= 2:
+                    # Take first 2-3 words only
+                    clean_name = ' '.join(words[:min(3, len(words))])
+                    # Filter out common non-name words and clean up
+                    if not re.match(r'^(Contract|Customer|Client|Policy|Vehicle|Service|Lender|PCMI|System|Cancellation|Request|Form|Letter|Screenshot|Agreement|Partial|Inconsistent|Slightly|Different|Formatting|Additional|Notes|Moving|State|Approved|Number|Date|Reason|Mileage|Amount|Status|Required|Eligible|Calculation|Reading|Current|Original|Effective|Terms|Conditions|Apply|Generated|Data|VIN|PN|CU|AUTO|FI)$', clean_name, re.IGNORECASE):
+                        # Remove "VIN" from the end if present
+                        clean_name = re.sub(r'\s+VIN$', '', clean_name)
+                        if clean_name.strip():
+                            filtered_names.append(clean_name.strip())
         data['customer_name'] = list(set(filtered_names))
         
         # Date extraction - look for various date formats
@@ -170,7 +184,8 @@ class SimpleTextProcessor:
             matches = re.findall(pattern, text, re.IGNORECASE)
             for match in matches:
                 clean_match = re.sub(r'[^\d]', '', match)
-                if len(clean_match) >= 3 and len(clean_match) <= 8:
+                # Filter out very short numbers (likely not mileage) and years
+                if len(clean_match) >= 4 and len(clean_match) <= 8 and not (1900 <= int(clean_match) <= 2030):
                     all_mileages.append(clean_match)
         data['mileage'] = list(set(all_mileages))
         
@@ -414,6 +429,54 @@ def main():
         with col4:
             st.metric("Mileages Found", len(all_data['mileage']))
             st.metric("Files Processed", len(files_processed))
+        
+        # File-by-File Data Comparison
+        st.subheader("📊 File-by-File Data Comparison")
+        
+        # Create a comparison table showing data from each file
+        comparison_data = []
+        
+        # Get all unique fields across all files
+        all_fields = set()
+        for file_data in files_processed:
+            all_fields.update(file_data['data'].keys())
+        
+        # Create comparison rows
+        for field in sorted(all_fields):
+            row = {'Field': field.replace('_', ' ').title()}
+            
+            # Add data from each file
+            for i, file_data in enumerate(files_processed):
+                filename = file_data['filename']
+                # Truncate long filenames for display
+                display_name = filename[:20] + '...' if len(filename) > 20 else filename
+                file_values = file_data['data'].get(field, [])
+                unique_values = list(set(file_values))
+                
+                if unique_values:
+                    row[f'File {i+1}: {display_name}'] = ', '.join(unique_values[:3]) + ('...' if len(unique_values) > 3 else '')
+                else:
+                    row[f'File {i+1}: {display_name}'] = 'Not found'
+            
+            # Add match status
+            all_values = []
+            for file_data in files_processed:
+                file_values = file_data['data'].get(field, [])
+                all_values.extend(file_values)
+            
+            unique_all = list(set(all_values))
+            if len(unique_all) == 1:
+                row['Match Status'] = '✅ All Match'
+            elif len(unique_all) > 1:
+                row['Match Status'] = f'❌ {len(unique_all)} Different Values'
+            else:
+                row['Match Status'] = 'ℹ️ Not Found'
+            
+            comparison_data.append(row)
+        
+        # Display comparison table
+        df_comparison = pd.DataFrame(comparison_data)
+        st.dataframe(df_comparison, use_container_width=True)
         
         # QC Checklist Results
         st.subheader("📋 QC Checklist Results")
