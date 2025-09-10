@@ -712,6 +712,11 @@ class CancellationProcessor:
             r'(?:sale|effect|contract|purchase|billed)[:\s]*(\d{1,2}/\d{1,2}/\d{2,4})',
             # Pattern for PCMI table format
             r'(?:sale\s*date|effect\s*date)[:\s]*(\d{1,2}/\d{1,2}/\d{4})',
+            # Additional patterns for common formats
+            r'(?:sale|purchase|contract|effect)[:\s]*(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})',
+            r'(?:sale|purchase|contract|effect)[:\s]*(\d{4}[-/]\d{1,2}[-/]\d{1,2})',
+            r'(?:sale|purchase|contract|effect)[:\s]*(\d{1,2}\s+\w+\s+\d{4})',
+            r'(?:sale|purchase|contract|effect)[:\s]*(\w+\s+\d{1,2},?\s+\d{4})',
         ]
         
         sale_dates = []
@@ -1103,8 +1108,8 @@ class CancellationProcessor:
                 # For PDFs, convert first page to image if pdf2image is available
                 if PDF2IMAGE_AVAILABLE:
                     try:
-                        # Convert PDF to image (first page only)
-                        images = convert_from_path(file_path, first_page=1, last_page=1, dpi=150)
+                        # Convert PDF to image (first page only) with higher DPI for better quality
+                        images = convert_from_path(file_path, first_page=1, last_page=1, dpi=300)
                         if images:
                             # Get the first page image
                             pdf_image = images[0]
@@ -1179,6 +1184,31 @@ class CancellationProcessor:
             draw.text((10, 30), str(e)[:20], fill='white', font=font)
             print(f"Error creating thumbnail for {filename}: {e}")
             return img
+
+    def create_high_res_image(self, file_data, temp_dir):
+        """Create a high-resolution version of the file for click-to-expand"""
+        filename = file_data.get('filename', '')
+        file_path = os.path.join(temp_dir, filename)
+        file_ext = os.path.splitext(filename)[1].lower()
+        
+        try:
+            if file_ext in ['.png', '.jpg', '.jpeg', '.tiff', '.tif']:
+                # For images, return the original
+                return Image.open(file_path)
+            elif file_ext == '.pdf':
+                # For PDFs, convert to high-res image
+                if PDF2IMAGE_AVAILABLE:
+                    try:
+                        # Convert PDF to high-res image
+                        images = convert_from_path(file_path, first_page=1, last_page=1, dpi=600)
+                        if images:
+                            return images[0]
+                    except Exception as e:
+                        print(f"High-res PDF conversion failed for {filename}: {e}")
+            return None
+        except Exception as e:
+            print(f"Error creating high-res image for {filename}: {e}")
+            return None
     
     def display_file_thumbnails(self, files_data, temp_dir):
         """Display all files as thumbnails in a clean grid"""
@@ -1205,10 +1235,21 @@ class CancellationProcessor:
                     file_ext = os.path.splitext(filename)[1].lower()
                     
                     with col:
-                        # Use pre-created thumbnail
+                        # Use pre-created thumbnail with click-to-expand
                         thumbnail = file_data.get('thumbnail')
                         if thumbnail:
+                            # Display thumbnail
                             st.image(thumbnail, caption=filename, use_container_width=True)
+                            
+                            # Add click-to-expand functionality
+                            if st.button(f"🔍 Expand {filename}", key=f"expand_{i}_{j}"):
+                                # Create high-res version for expansion
+                                high_res = self.create_high_res_image(file_data, temp_dir)
+                                if high_res:
+                                    st.subheader(f"🔍 {filename} - Full Resolution")
+                                    st.image(high_res, use_container_width=True)
+                                else:
+                                    st.warning(f"Could not create high-resolution version of {filename}")
                         else:
                             st.write("📄 No thumbnail available")
                         
@@ -1715,6 +1756,10 @@ class CancellationProcessor:
             all_cxl_dates = [d for f in files for d in f.get('cancellation_dates', []) if d.strip()]
             all_sale_dates = [d for f in files for d in f.get('sale_dates', []) if d.strip()]
             
+            # Debug: Print what dates we found
+            print(f"Debug - Found {len(all_cxl_dates)} cancellation dates: {all_cxl_dates}")
+            print(f"Debug - Found {len(all_sale_dates)} sale dates: {all_sale_dates}")
+            
             # Try parsing each date combination
             for cxl_date_str in all_cxl_dates:
                 for sale_date_str in all_sale_dates:
@@ -1724,6 +1769,8 @@ class CancellationProcessor:
                         days_diff = (cxl_date - sale_date).days
                         result['Is the cancellation effective date past 90 days from contract sale date?'] = 'Yes' if days_diff > 90 else 'No'
                         result['Days Difference'] = f"{days_diff} days"
+                        result['Sale Date'] = sale_date_str  # Update the sale date
+                        print(f"Debug - Successfully calculated {days_diff} days between {sale_date_str} and {cxl_date_str}")
                         break
                 if 'Days Difference' in result:
                     break
@@ -1818,12 +1865,31 @@ class CancellationProcessor:
         result['Refund Calculation Issues'] = '; '.join(calculation_issues) if calculation_issues else ''
         result['Refund Calculation Details'] = calculation_details
         
-        # Mileage - show all detected mileages
+        # Mileage - show all detected mileages with normalized comparison
         if all_mileages:
             # Remove duplicates while preserving order
             unique_mileages = list(dict.fromkeys(all_mileages))
-            result['Mileage values found'] = ', '.join(unique_mileages)
-            result['Mileage Match Status'] = 'PASS' if len(unique_mileages) == 1 else 'FAIL' if len(unique_mileages) > 1 else 'INFO'
+            
+            # Normalize mileages for comparison (remove commas, spaces, etc.)
+            normalized_mileages = []
+            for mileage in unique_mileages:
+                try:
+                    # Remove all non-digit characters and convert to int
+                    clean_mileage = re.sub(r'[^\d]', '', str(mileage))
+                    if clean_mileage:
+                        normalized_mileages.append(int(clean_mileage))
+                    else:
+                        normalized_mileages.append(mileage)  # Keep original if can't clean
+                except (ValueError, TypeError):
+                    normalized_mileages.append(mileage)  # Keep original if can't convert
+            
+            # Check if all normalized mileages are the same
+            if len(set(normalized_mileages)) == 1:
+                result['Mileage values found'] = unique_mileages[0]  # Show first format
+                result['Mileage Match Status'] = 'PASS'
+            else:
+                result['Mileage values found'] = ', '.join(unique_mileages)
+                result['Mileage Match Status'] = 'FAIL'
         else:
             result['Mileage values found'] = ''
             result['Mileage Match Status'] = 'INFO'
@@ -1857,8 +1923,10 @@ class CancellationProcessor:
                                 file_data = {'filename': file}
                                 thumbnail = self.create_thumbnail(file_data, temp_dir)
                                 fields['thumbnail'] = thumbnail
+                                print(f"Successfully created thumbnail for {file}")
                             except Exception as e:
                                 print(f"Failed to create thumbnail for {file}: {e}")
+                                st.error(f"Thumbnail creation failed for {file}: {e}")
                                 fields['thumbnail'] = None
                             
                             self.files_data.append(fields)
@@ -2005,24 +2073,17 @@ def main():
                     total_mileages = sum(len(f.get('mileages', [])) for f in processor.files_data)
                     total_customers = sum(len(f.get('customer_names', [])) for f in processor.files_data)
                     
-                    # Also count from processed results
-                    unique_vins = len(set([r.get('VIN (canonical)', '') for r in results if r.get('VIN (canonical)', '').strip()]))
-                    unique_contracts = len(set([r.get('Contract (canonical)', '') for r in results if r.get('Contract (canonical)', '').strip()]))
-                    unique_reasons = len(set([r.get('Reason (canonical)', '') for r in results if r.get('Reason (canonical)', '').strip()]))
-                    unique_cxl_dates = len(set([r.get('Cancellation Effective Date', '') for r in results if r.get('Cancellation Effective Date', '').strip()]))
-                    unique_sale_dates = len(set([r.get('Sale Date', '') for r in results if r.get('Sale Date', '').strip()]))
-                    unique_mileages = len(set([r.get('Mileage values found', '') for r in results if r.get('Mileage values found', '').strip()]))
                     
                     col1, col2, col3, col4 = st.columns(4)
                     with col1:
-                        st.metric("VINs Found", f"{total_vins} ({unique_vins} unique)")
-                        st.metric("Contracts Found", f"{total_contracts} ({unique_contracts} unique)")
+                        st.metric("VINs Found", total_vins)
+                        st.metric("Contracts Found", total_contracts)
                     with col2:
-                        st.metric("Reasons Found", f"{total_reasons} ({unique_reasons} unique)")
-                        st.metric("Cancellation Dates", f"{total_cxl_dates} ({unique_cxl_dates} unique)")
+                        st.metric("Reasons Found", total_reasons)
+                        st.metric("Cancellation Dates", total_cxl_dates)
                     with col3:
-                        st.metric("Sale Dates Found", f"{total_sale_dates} ({unique_sale_dates} unique)")
-                        st.metric("Mileages Found", f"{total_mileages} ({unique_mileages} unique)")
+                        st.metric("Sale Dates Found", total_sale_dates)
+                        st.metric("Mileages Found", total_mileages)
                     with col4:
                         st.metric("Addresses Found", total_addresses)
                         st.metric("Customer Names", total_customers)
