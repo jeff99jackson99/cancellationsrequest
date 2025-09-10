@@ -30,30 +30,11 @@ st.set_page_config(
 
 # Title and description
 st.title("📋 QC Form Cancellations Checker")
-st.markdown("Upload a ZIP file containing cancellation packet files to perform quality control checks. The app can process screenshots of bucket files to extract NCB fee data.")
+st.markdown("Upload a ZIP file containing cancellation packet files to perform quality control checks. You can also upload individual bucket screenshots for NCB fee analysis.")
 
 # Check for OpenCV availability
 if not OPENCV_AVAILABLE:
     st.warning("⚠️ OpenCV is not available. Screenshot processing will use basic OCR without image preprocessing.")
-
-# Sidebar with QC Checklist
-st.sidebar.header("QC Checklist")
-st.sidebar.markdown("""
-**Checklist Items:**
-1. VIN match on all forms
-2. Contract match on all forms and Google sheet
-3. Reason match across all forms
-4. Cancellation date match across all forms (favor lender letter if applicable)
-5. Is the cancellation effective date past 90 days from contract sale date?
-6. Is there an Agent NCB Fee?
-7. Is there a Dealer NCB Fee?
-8. Is there a different address to send the refund? (only if lender letter addressed to Ascent)
-9. All necessary signatures collected?
-10. Is this an Autohouse Contract?
-11. Is this a customer direct cancellation? (Dealer Out of Business or FF contract)
-12. Is this a Diversicare contract?
-13. PCMI Screenshot (Of NCB fee buckets)
-""")
 
 class ScreenshotProcessor:
     """Enhanced screenshot processing for bucket files"""
@@ -566,13 +547,66 @@ class CancellationProcessor:
 def main():
     processor = CancellationProcessor()
     
-    # File upload
-    uploaded_file = st.file_uploader(
-        "Upload a ZIP file containing cancellation packet files",
-        type=['zip'],
-        help="Upload a ZIP file containing PDF, DOCX, DOC, image, or text files. Screenshots of bucket files will be automatically processed for NCB fee data."
-    )
+    # Create two columns for uploads
+    col1, col2 = st.columns(2)
     
+    with col1:
+        st.subheader("📁 Upload Cancellation Packet ZIP")
+        uploaded_file = st.file_uploader(
+            "Upload a ZIP file containing cancellation packet files",
+            type=['zip'],
+            help="Upload a ZIP file containing PDF, DOCX, DOC, image, or text files. Screenshots of bucket files will be automatically processed for NCB fee data.",
+            key="zip_uploader"
+        )
+    
+    with col2:
+        st.subheader("📸 Upload Bucket Screenshot")
+        uploaded_screenshot = st.file_uploader(
+            "Upload a bucket screenshot for NCB fee analysis",
+            type=['png', 'jpg', 'jpeg', 'tiff'],
+            help="Upload a screenshot of the PCMI NCB fee buckets to extract fee amounts.",
+            key="screenshot_uploader"
+        )
+    
+    # Process individual screenshot if uploaded
+    screenshot_data = None
+    if uploaded_screenshot is not None:
+        with st.spinner("Processing bucket screenshot..."):
+            try:
+                # Save uploaded file temporarily
+                with tempfile.NamedTemporaryFile(delete=False, suffix=f".{uploaded_screenshot.name.split('.')[-1]}") as tmp_file:
+                    tmp_file.write(uploaded_screenshot.getvalue())
+                    tmp_file_path = tmp_file.name
+                
+                # Process the screenshot
+                screenshot_data = processor.screenshot_processor.extract_ncb_data(tmp_file_path)
+                
+                # Clean up temp file
+                os.unlink(tmp_file_path)
+                
+                st.success("Screenshot processed successfully!")
+                
+                # Display screenshot results
+                st.subheader("📊 Screenshot Analysis Results")
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.metric("Agent NCB Amount", f"${screenshot_data['agent_ncb_amount']:.2f}" if screenshot_data['agent_ncb_amount'] else "N/A")
+                
+                with col2:
+                    st.metric("Dealer NCB Amount", f"${screenshot_data['dealer_ncb_amount']:.2f}" if screenshot_data['dealer_ncb_amount'] else "N/A")
+                
+                with col3:
+                    st.metric("Total Amount", f"${screenshot_data['total_amount']:.2f}" if screenshot_data['total_amount'] else "N/A")
+                
+                # Show extracted text
+                with st.expander("View Extracted Text"):
+                    st.text(screenshot_data['raw_text'])
+                    
+            except Exception as e:
+                st.error(f"Error processing screenshot: {str(e)}")
+    
+    # Process ZIP file if uploaded
     if uploaded_file is not None:
         with st.spinner("Processing files..."):
             try:
@@ -583,35 +617,11 @@ def main():
                     df = pd.DataFrame(results)
                     
                     # Display results
-                    st.success(f"Processed {len(results)} packet(s) from {len(processor.files_data)} file(s)")
+                    st.success(f"✅ Processed {len(results)} packet(s) from {len(processor.files_data)} file(s)")
                     
-                    # Show dataframe
-                    st.dataframe(df, use_container_width=True)
-                    
-                    # Download buttons
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        csv = df.to_csv(index=False)
-                        st.download_button(
-                            label="Download CSV",
-                            data=csv,
-                            file_name=f"qc_cancellations_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                            mime="text/csv"
-                        )
-                    
-                    with col2:
-                        json_data = df.to_json(orient='records', indent=2)
-                        st.download_button(
-                            label="Download JSON",
-                            data=json_data,
-                            file_name=f"qc_cancellations_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                            mime="application/json"
-                        )
-                    
-                    # Summary statistics
-                    st.subheader("Summary Statistics")
-                    col1, col2, col3, col4 = st.columns(4)
+                    # Summary statistics - more prominent
+                    st.subheader("📊 QC Analysis Summary")
+                    col1, col2, col3, col4, col5 = st.columns(5)
                     
                     with col1:
                         st.metric("Total Packets", len(results))
@@ -628,10 +638,40 @@ def main():
                         screenshot_count = len([r for r in results if 'Present (hint detected)' in str(r.get('PCMI Screenshot (Of NCB fee buckets)', ''))])
                         st.metric("Screenshots Processed", screenshot_count)
                     
+                    with col5:
+                        info_count = len([r for r in results if r['VIN match on all forms'] == 'INFO'])
+                        st.metric("Needs Review (INFO)", info_count)
+                    
+                    # Main results table - more prominent
+                    st.subheader("📋 QC Checklist Results")
+                    st.dataframe(df, use_container_width=True)
+                    
+                    # Download buttons
+                    st.subheader("💾 Download Results")
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        csv = df.to_csv(index=False)
+                        st.download_button(
+                            label="📄 Download CSV",
+                            data=csv,
+                            file_name=f"qc_cancellations_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                            mime="text/csv"
+                        )
+                    
+                    with col2:
+                        json_data = df.to_json(orient='records', indent=2)
+                        st.download_button(
+                            label="📄 Download JSON",
+                            data=json_data,
+                            file_name=f"qc_cancellations_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                            mime="application/json"
+                        )
+                    
                     # Show screenshot processing details
                     screenshot_files = [f for f in processor.files_data if f.get('agent_ncb_amount') is not None or f.get('dealer_ncb_amount') is not None]
                     if screenshot_files:
-                        st.subheader("Screenshot Processing Details")
+                        st.subheader("📸 Screenshot Processing Details")
                         screenshot_data = []
                         for file_data in screenshot_files:
                             screenshot_data.append({
@@ -643,6 +683,42 @@ def main():
                         
                         if screenshot_data:
                             st.dataframe(pd.DataFrame(screenshot_data), use_container_width=True)
+                    
+                    # Detailed analysis for each packet
+                    st.subheader("🔍 Detailed Packet Analysis")
+                    for i, result in enumerate(results):
+                        with st.expander(f"Packet {i+1}: {result['Packet Key']} ({result['Files']})"):
+                            # Create a more detailed view
+                            detail_cols = st.columns(2)
+                            
+                            with detail_cols[0]:
+                                st.write("**Basic Information:**")
+                                st.write(f"• VIN: {result.get('VIN (canonical)', 'N/A')}")
+                                st.write(f"• Contract: {result.get('Contract (canonical)', 'N/A')}")
+                                st.write(f"• Reason: {result.get('Reason (canonical)', 'N/A')}")
+                                st.write(f"• Cancellation Date: {result.get('Cancellation Effective Date', 'N/A')}")
+                                st.write(f"• Sale Date: {result.get('Sale Date', 'N/A')}")
+                            
+                            with detail_cols[1]:
+                                st.write("**QC Status:**")
+                                st.write(f"• VIN Match: {result.get('VIN match on all forms', 'N/A')}")
+                                st.write(f"• Contract Match: {result.get('Contract match on all forms and Google sheet', 'N/A')}")
+                                st.write(f"• Reason Match: {result.get('Reason match across all forms', 'N/A')}")
+                                st.write(f"• Date Match: {result.get('Cancellation date match across all forms (favor lender letter if applicable)', 'N/A')}")
+                                st.write(f"• 90+ Days: {result.get('Is the cancellation effective date past 90 days from contract sale date?', 'N/A')}")
+                            
+                            st.write("**Fees & Flags:**")
+                            st.write(f"• Agent NCB: {result.get('Is there an Agent NCB Fee?', 'N/A')}")
+                            st.write(f"• Dealer NCB: {result.get('Is there a Dealer NCB Fee?', 'N/A')}")
+                            st.write(f"• Refund Address: {result.get('Is there a different address to send the refund? (only if lender letter addressed to Ascent)', 'N/A')}")
+                            st.write(f"• Signatures: {result.get('All necessary signatures collected?', 'N/A')}")
+                            st.write(f"• Autohouse: {result.get('Is this an Autohouse Contract?', 'N/A')}")
+                            st.write(f"• Customer Direct: {result.get('Is this a customer direct cancellation? (Dealer Out of Business or FF contract)', 'N/A')}")
+                            st.write(f"• Diversicare: {result.get('Is this a Diversicare contract?', 'N/A')}")
+                            st.write(f"• PCMI Screenshot: {result.get('PCMI Screenshot (Of NCB fee buckets)', 'N/A')}")
+                            
+                            if result.get('Mileage values found'):
+                                st.write(f"• Mileage: {result.get('Mileage values found', 'N/A')}")
                 
                 else:
                     st.warning("No valid files found in the ZIP archive.")

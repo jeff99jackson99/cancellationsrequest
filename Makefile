@@ -38,7 +38,7 @@ test-deps:
 	python test_installation.py
 
 create-test-data:
-	python create_test_data.py
+	python3 create_simple_test_data.py
 
 # For macOS users - install Tesseract
 install-tesseract:
