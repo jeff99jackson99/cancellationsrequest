@@ -222,6 +222,7 @@ class CancellationProcessor:
             'sale_dates': [],
             'refund_addresses': [],
             'mileages': [],
+            'customer_names': [],
             'has_agent_ncb': False,
             'has_dealer_ncb': False,
             'is_autohouse': False,
@@ -269,6 +270,21 @@ class CancellationProcessor:
         # Mileage extraction
         mileage_pattern = r'(?:mileage|odom(?:eter)?)\s*[:#]?\s*([0-9]{1,6}(?:,[0-9]{3})?)'
         fields['mileages'] = re.findall(mileage_pattern, text, re.IGNORECASE)
+        
+        # Customer name extraction
+        customer_patterns = [
+            r'(?:customer|client|name)[:\s]+([A-Za-z\s]+?)(?:\n|$)',
+            r'(?:customer|client|name)[:\s]+([A-Za-z\s]+?)(?:\n|$)',
+            r'Name[:\s]+([A-Za-z\s]+?)(?:\n|$)',
+            r'Customer[:\s]+([A-Za-z\s]+?)(?:\n|$)'
+        ]
+        
+        for pattern in customer_patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            for match in matches:
+                name = match.strip()
+                if len(name) > 2 and not any(char.isdigit() for char in name):
+                    fields['customer_names'].append(name)
         
         # Flag detection with partial-word matching
         fields['has_agent_ncb'] = bool(re.search(r'Agent\s+NCB|No\s*Chargeback', text, re.IGNORECASE))
@@ -361,7 +377,9 @@ class CancellationProcessor:
         # Initialize result
         result = {
             'Packet Key': packet_key,
-            'Files': ', '.join([f['filename'] for f in files])
+            'Files': ', '.join([f['filename'] for f in files]),
+            'Contract Number': '',
+            'Customer Name': ''
         }
         
         # Create detailed source tracking
@@ -372,7 +390,8 @@ class CancellationProcessor:
             'cancellation_dates': [],
             'sale_dates': [],
             'refund_addresses': [],
-            'mileages': []
+            'mileages': [],
+            'customer_names': []
         }
         
         # Collect all values from all files in packet with source tracking
@@ -383,6 +402,7 @@ class CancellationProcessor:
         all_sale_dates = []
         all_refund_addresses = []
         all_mileages = []
+        all_customer_names = []
         
         has_agent_ncb = False
         has_dealer_ncb = False
@@ -430,6 +450,10 @@ class CancellationProcessor:
                 all_mileages.append(mileage)
                 source_data['mileages'].append(f"{mileage} (from {filename})")
             
+            for name in file_data['customer_names']:
+                all_customer_names.append(name)
+                source_data['customer_names'].append(f"{name} (from {filename})")
+            
             has_agent_ncb = has_agent_ncb or file_data['has_agent_ncb']
             has_dealer_ncb = has_dealer_ncb or file_data['has_dealer_ncb']
             is_autohouse = is_autohouse or file_data['is_autohouse']
@@ -455,20 +479,26 @@ class CancellationProcessor:
         all_sale_dates = list(set([d for d in all_sale_dates if d.strip()]))
         all_refund_addresses = list(set([a for a in all_refund_addresses if a.strip()]))
         all_mileages = list(set([m for m in all_mileages if m.strip()]))
+        all_customer_names = list(set([n for n in all_customer_names if n.strip()]))
+        
+        # Set customer name
+        if all_customer_names:
+            result['Customer Name'] = all_customer_names[0]  # Take first one
         
         # VIN evaluation
         vin_status, vin_value = self.reconcile_values(all_vins)
-        result['VIN match on all forms'] = vin_status
+        result['Vin Match on all forms'] = vin_status
         result['VIN (canonical)'] = vin_value
         
         # Contract evaluation
         contract_status, contract_value = self.reconcile_values(all_contracts)
-        result['Contract match on all forms and Google sheet'] = contract_status
+        result['Contract Match on all forms and Google sheet'] = contract_status
         result['Contract (canonical)'] = contract_value
+        result['Contract Number'] = contract_value  # Set the contract number for display
         
         # Reason evaluation
         reason_status, reason_value = self.reconcile_values(all_reasons)
-        result['Reason match across all forms'] = reason_status
+        result['Reason Match across all forms'] = reason_status
         if reason_value:
             result['Reason (canonical)'] = '; '.join([self.normalize_reason(r) for r in reason_value.split('; ')])
         else:
@@ -476,7 +506,7 @@ class CancellationProcessor:
         
         # Cancellation date evaluation with lender letter preference
         cxl_status, cxl_value = self.choose_cxl_date_with_lender_preference(files, all_cancellation_dates)
-        result['Cancellation date match across all forms (favor lender letter if applicable)'] = cxl_status
+        result['Cancellation date match across all forms. (Favor lender letter if applicable)'] = cxl_status
         result['Cancellation Effective Date'] = cxl_value
         
         # Sale date
@@ -508,10 +538,10 @@ class CancellationProcessor:
         
         # Refund address
         if is_lender_letter and all_refund_addresses:
-            result['Is there a different address to send the refund? (only if lender letter addressed to Ascent)'] = 'Yes'
+            result['Is there a different address to send the refund? (only applicable if the request included a lender letter addressed to Ascent)'] = 'Yes'
             result['Alt Refund Address (if any)'] = '; '.join(all_refund_addresses[:2])  # First 2 addresses
         else:
-            result['Is there a different address to send the refund? (only if lender letter addressed to Ascent)'] = 'No'
+            result['Is there a different address to send the refund? (only applicable if the request included a lender letter addressed to Ascent)'] = 'No'
             result['Alt Refund Address (if any)'] = ''
         
         # Signatures
@@ -660,11 +690,11 @@ def main():
                         st.metric("Total Packets", len(results))
                     
                     with col2:
-                        pass_count = len([r for r in results if r['VIN match on all forms'] == 'PASS'])
+                        pass_count = len([r for r in results if r['Vin Match on all forms'] == 'PASS'])
                         st.metric("VIN Matches (PASS)", pass_count)
                     
                     with col3:
-                        fail_count = len([r for r in results if r['VIN match on all forms'] == 'FAIL'])
+                        fail_count = len([r for r in results if r['Vin Match on all forms'] == 'FAIL'])
                         st.metric("VIN Conflicts (FAIL)", fail_count)
                     
                     with col4:
@@ -672,7 +702,7 @@ def main():
                         st.metric("Screenshots Processed", screenshot_count)
                     
                     with col5:
-                        info_count = len([r for r in results if r['VIN match on all forms'] == 'INFO'])
+                        info_count = len([r for r in results if r['Vin Match on all forms'] == 'INFO'])
                         st.metric("Needs Review (INFO)", info_count)
                     
                     # Visual QC Checklist Results
@@ -681,6 +711,14 @@ def main():
                     # Create visual checklist for each packet
                     for i, result in enumerate(results):
                         st.markdown(f"### Packet {i+1}: {result['Packet Key']}")
+                        
+                        # Show Contract Number and Customer Name prominently
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.markdown(f"**Contract Number:** {result.get('Contract Number', 'N/A')}")
+                        with col2:
+                            st.markdown(f"**Customer Name:** {result.get('Customer Name', 'N/A')}")
+                        
                         st.markdown(f"**Files:** {result['Files']}")
                         
                         # Show source data if available
@@ -734,30 +772,30 @@ def main():
                             st.markdown("**Basic Information:**")
                             
                             # VIN Match
-                            vin_status = result.get('VIN match on all forms', 'INFO')
+                            vin_status = result.get('Vin Match on all forms', 'INFO')
                             vin_color = "🟢" if vin_status == "PASS" else "🔴" if vin_status == "FAIL" else "🟡"
-                            st.markdown(f"{vin_color} VIN Match: {vin_status}")
+                            st.markdown(f"{vin_color} Vin Match on all forms: {vin_status}")
                             if result.get('VIN (canonical)'):
                                 st.markdown(f"   └─ VIN: {result.get('VIN (canonical)')}")
                             
                             # Contract Match
-                            contract_status = result.get('Contract match on all forms and Google sheet', 'INFO')
+                            contract_status = result.get('Contract Match on all forms and Google sheet', 'INFO')
                             contract_color = "🟢" if contract_status == "PASS" else "🔴" if contract_status == "FAIL" else "🟡"
-                            st.markdown(f"{contract_color} Contract Match: {contract_status}")
+                            st.markdown(f"{contract_color} Contract Match on all forms and Google sheet: {contract_status}")
                             if result.get('Contract (canonical)'):
                                 st.markdown(f"   └─ Contract: {result.get('Contract (canonical)')}")
                             
                             # Reason Match
-                            reason_status = result.get('Reason match across all forms', 'INFO')
+                            reason_status = result.get('Reason Match across all forms', 'INFO')
                             reason_color = "🟢" if reason_status == "PASS" else "🔴" if reason_status == "FAIL" else "🟡"
-                            st.markdown(f"{reason_color} Reason Match: {reason_status}")
+                            st.markdown(f"{reason_color} Reason Match across all forms: {reason_status}")
                             if result.get('Reason (canonical)'):
                                 st.markdown(f"   └─ Reason: {result.get('Reason (canonical)')}")
                             
                             # Date Match
-                            date_status = result.get('Cancellation date match across all forms (favor lender letter if applicable)', 'INFO')
+                            date_status = result.get('Cancellation date match across all forms. (Favor lender letter if applicable)', 'INFO')
                             date_color = "🟢" if date_status == "PASS" else "🔴" if date_status == "FAIL" else "🟡"
-                            st.markdown(f"{date_color} Date Match: {date_status}")
+                            st.markdown(f"{date_color} Cancellation date match across all forms. (Favor lender letter if applicable): {date_status}")
                             if result.get('Cancellation Effective Date'):
                                 st.markdown(f"   └─ Date: {result.get('Cancellation Effective Date')}")
                         
@@ -782,9 +820,9 @@ def main():
                             st.markdown(f"{dealer_color} Dealer NCB: {dealer_ncb}")
                             
                             # Refund Address
-                            refund_status = result.get('Is there a different address to send the refund? (only if lender letter addressed to Ascent)', 'No')
+                            refund_status = result.get('Is there a different address to send the refund? (only applicable if the request included a lender letter addressed to Ascent)', 'No')
                             refund_color = "🟢" if refund_status == "Yes" else "🔴" if refund_status == "No" else "🟡"
-                            st.markdown(f"{refund_color} Refund Address: {refund_status}")
+                            st.markdown(f"{refund_color} Is there a different address to send the refund? (only applicable if the request included a lender letter addressed to Ascent): {refund_status}")
                             if result.get('Alt Refund Address (if any)'):
                                 st.markdown(f"   └─ Address: {result.get('Alt Refund Address (if any)')}")
                         
