@@ -586,18 +586,27 @@ def main():
                 
                 st.success("Screenshot processed successfully!")
                 
-                # Display screenshot results
+                # Display screenshot results with visual indicators
                 st.subheader("📊 Screenshot Analysis Results")
+                
+                # Visual checklist for screenshot
+                st.markdown("### Bucket Screenshot Analysis")
                 col1, col2, col3 = st.columns(3)
                 
                 with col1:
-                    st.metric("Agent NCB Amount", f"${screenshot_data['agent_ncb_amount']:.2f}" if screenshot_data['agent_ncb_amount'] else "N/A")
+                    agent_amount = screenshot_data['agent_ncb_amount']
+                    agent_color = "🟢" if agent_amount and agent_amount > 0 else "🔴" if agent_amount == 0 else "🟡"
+                    st.markdown(f"{agent_color} Agent NCB: ${agent_amount:.2f}" if agent_amount is not None else f"{agent_color} Agent NCB: N/A")
                 
                 with col2:
-                    st.metric("Dealer NCB Amount", f"${screenshot_data['dealer_ncb_amount']:.2f}" if screenshot_data['dealer_ncb_amount'] else "N/A")
+                    dealer_amount = screenshot_data['dealer_ncb_amount']
+                    dealer_color = "🟢" if dealer_amount and dealer_amount > 0 else "🔴" if dealer_amount == 0 else "🟡"
+                    st.markdown(f"{dealer_color} Dealer NCB: ${dealer_amount:.2f}" if dealer_amount is not None else f"{dealer_color} Dealer NCB: N/A")
                 
                 with col3:
-                    st.metric("Total Amount", f"${screenshot_data['total_amount']:.2f}" if screenshot_data['total_amount'] else "N/A")
+                    total_amount = screenshot_data['total_amount']
+                    total_color = "🟢" if total_amount and total_amount > 0 else "🔴" if total_amount == 0 else "🟡"
+                    st.markdown(f"{total_color} Total Amount: ${total_amount:.2f}" if total_amount is not None else f"{total_color} Total Amount: N/A")
                 
                 # Show extracted text
                 with st.expander("View Extracted Text"):
@@ -642,8 +651,133 @@ def main():
                         info_count = len([r for r in results if r['VIN match on all forms'] == 'INFO'])
                         st.metric("Needs Review (INFO)", info_count)
                     
-                    # Main results table - more prominent
+                    # Visual QC Checklist Results
                     st.subheader("📋 QC Checklist Results")
+                    
+                    # Create visual checklist for each packet
+                    for i, result in enumerate(results):
+                        st.markdown(f"### Packet {i+1}: {result['Packet Key']}")
+                        st.markdown(f"**Files:** {result['Files']}")
+                        
+                        # Create visual checklist with color coding
+                        checklist_cols = st.columns(3)
+                        
+                        with checklist_cols[0]:
+                            st.markdown("**Basic Information:**")
+                            
+                            # VIN Match
+                            vin_status = result.get('VIN match on all forms', 'INFO')
+                            vin_color = "🟢" if vin_status == "PASS" else "🔴" if vin_status == "FAIL" else "🟡"
+                            st.markdown(f"{vin_color} VIN Match: {vin_status}")
+                            if result.get('VIN (canonical)'):
+                                st.markdown(f"   └─ VIN: {result.get('VIN (canonical)')}")
+                            
+                            # Contract Match
+                            contract_status = result.get('Contract match on all forms and Google sheet', 'INFO')
+                            contract_color = "🟢" if contract_status == "PASS" else "🔴" if contract_status == "FAIL" else "🟡"
+                            st.markdown(f"{contract_color} Contract Match: {contract_status}")
+                            if result.get('Contract (canonical)'):
+                                st.markdown(f"   └─ Contract: {result.get('Contract (canonical)')}")
+                            
+                            # Reason Match
+                            reason_status = result.get('Reason match across all forms', 'INFO')
+                            reason_color = "🟢" if reason_status == "PASS" else "🔴" if reason_status == "FAIL" else "🟡"
+                            st.markdown(f"{reason_color} Reason Match: {reason_status}")
+                            if result.get('Reason (canonical)'):
+                                st.markdown(f"   └─ Reason: {result.get('Reason (canonical)')}")
+                            
+                            # Date Match
+                            date_status = result.get('Cancellation date match across all forms (favor lender letter if applicable)', 'INFO')
+                            date_color = "🟢" if date_status == "PASS" else "🔴" if date_status == "FAIL" else "🟡"
+                            st.markdown(f"{date_color} Date Match: {date_status}")
+                            if result.get('Cancellation Effective Date'):
+                                st.markdown(f"   └─ Date: {result.get('Cancellation Effective Date')}")
+                        
+                        with checklist_cols[1]:
+                            st.markdown("**Time & Fees:**")
+                            
+                            # 90 Day Check
+                            days_status = result.get('Is the cancellation effective date past 90 days from contract sale date?', 'Unknown')
+                            days_color = "🟢" if days_status == "Yes" else "🔴" if days_status == "No" else "🟡"
+                            st.markdown(f"{days_color} 90+ Days: {days_status}")
+                            if result.get('Sale Date'):
+                                st.markdown(f"   └─ Sale Date: {result.get('Sale Date')}")
+                            
+                            # Agent NCB
+                            agent_ncb = result.get('Is there an Agent NCB Fee?', 'No')
+                            agent_color = "🟢" if "Yes" in agent_ncb else "🔴" if "No" in agent_ncb else "🟡"
+                            st.markdown(f"{agent_color} Agent NCB: {agent_ncb}")
+                            
+                            # Dealer NCB
+                            dealer_ncb = result.get('Is there a Dealer NCB Fee?', 'No')
+                            dealer_color = "🟢" if "Yes" in dealer_ncb else "🔴" if "No" in dealer_ncb else "🟡"
+                            st.markdown(f"{dealer_color} Dealer NCB: {dealer_ncb}")
+                            
+                            # Refund Address
+                            refund_status = result.get('Is there a different address to send the refund? (only if lender letter addressed to Ascent)', 'No')
+                            refund_color = "🟢" if refund_status == "Yes" else "🔴" if refund_status == "No" else "🟡"
+                            st.markdown(f"{refund_color} Refund Address: {refund_status}")
+                            if result.get('Alt Refund Address (if any)'):
+                                st.markdown(f"   └─ Address: {result.get('Alt Refund Address (if any)')}")
+                        
+                        with checklist_cols[2]:
+                            st.markdown("**Flags & Screenshots:**")
+                            
+                            # Signatures
+                            sig_status = result.get('All necessary signatures collected?', 'Needs manual check')
+                            sig_color = "🟢" if "Likely" in sig_status else "🔴" if "Needs manual check" in sig_status else "🟡"
+                            st.markdown(f"{sig_color} Signatures: {sig_status}")
+                            
+                            # Autohouse
+                            autohouse = result.get('Is this an Autohouse Contract?', 'No')
+                            autohouse_color = "🟢" if autohouse == "Yes" else "🔴" if autohouse == "No" else "🟡"
+                            st.markdown(f"{autohouse_color} Autohouse: {autohouse}")
+                            
+                            # Customer Direct
+                            customer_direct = result.get('Is this a customer direct cancellation? (Dealer Out of Business or FF contract)', 'No')
+                            customer_color = "🟢" if customer_direct == "Yes" else "🔴" if customer_direct == "No" else "🟡"
+                            st.markdown(f"{customer_color} Customer Direct: {customer_direct}")
+                            
+                            # Diversicare
+                            diversicare = result.get('Is this a Diversicare contract?', 'No')
+                            diversicare_color = "🟢" if diversicare == "Yes" else "🔴" if diversicare == "No" else "🟡"
+                            st.markdown(f"{diversicare_color} Diversicare: {diversicare}")
+                            
+                            # PCMI Screenshot
+                            pcmi_status = result.get('PCMI Screenshot (Of NCB fee buckets)', 'Not found')
+                            pcmi_color = "🟢" if "Present" in pcmi_status else "🔴" if "Not found" in pcmi_status else "🟡"
+                            st.markdown(f"{pcmi_color} PCMI Screenshot: {pcmi_status}")
+                            
+                            # Show NCB amounts if available from screenshots
+                            if result.get('Total NCB Amount'):
+                                st.markdown(f"   └─ Total NCB: {result.get('Total NCB Amount')}")
+                            
+                            # Mileage
+                            if result.get('Mileage values found'):
+                                st.markdown(f"🟢 Mileage: {result.get('Mileage values found')}")
+                        
+                        # Show screenshot details if this packet has bucket screenshots
+                        packet_files = result.get('Files', '').split(', ')
+                        screenshot_files = [f for f in processor.files_data if f['filename'] in packet_files and (f.get('agent_ncb_amount') is not None or f.get('dealer_ncb_amount') is not None)]
+                        
+                        if screenshot_files:
+                            st.markdown("**📸 Bucket Screenshot Details:**")
+                            for file_data in screenshot_files:
+                                col1, col2, col3 = st.columns(3)
+                                with col1:
+                                    st.metric("Agent NCB", f"${file_data['agent_ncb_amount']:.2f}" if file_data['agent_ncb_amount'] else "N/A")
+                                with col2:
+                                    st.metric("Dealer NCB", f"${file_data['dealer_ncb_amount']:.2f}" if file_data['dealer_ncb_amount'] else "N/A")
+                                with col3:
+                                    st.metric("Total Amount", f"${file_data['total_ncb_amount']:.2f}" if file_data['total_ncb_amount'] else "N/A")
+                                
+                                with st.expander(f"View extracted text from {file_data['filename']}"):
+                                    st.text(file_data.get('raw_text', 'No text extracted'))
+                        
+                        st.markdown("---")
+                    
+                    # Also show the data table for reference
+                    st.subheader("📊 Data Table View")
                     st.dataframe(df, use_container_width=True)
                     
                     # Download buttons
