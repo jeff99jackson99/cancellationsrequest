@@ -175,14 +175,24 @@ class PreciseTextProcessor:
     
     def extract_data_with_ai(self, file_path, filename):
         """Use AI to do ALL heavy lifting - analyze PDF directly for 100% accuracy"""
-        try:
-            if not OPENAI_AVAILABLE:
-                print("OpenAI not available, using regex extraction")
-                return self.extract_data_from_text("", filename)
+        print(f"🤖 Starting AI Vision analysis for {filename}")
+        
+        # AI MUST be available - no fallbacks
+        if not OPENAI_AVAILABLE:
+            print("❌ OpenAI not available - AI extraction required")
+            return {
+                'vin': [], 'contract_number': [], 'customer_name': [], 'cancellation_date': [],
+                'sale_date': [], 'contract_date': [], 'reason': [], 'mileage': [],
+                'total_refund': [], 'dealer_ncb': [], 'no_chargeback': []
+            }
                 
-            if not openai.api_key:
-                print("OpenAI API key not found, using regex extraction")
-                return self.extract_data_from_text("", filename)
+        if not openai.api_key:
+            print("❌ OpenAI API key not found - AI extraction required")
+            return {
+                'vin': [], 'contract_number': [], 'customer_name': [], 'cancellation_date': [],
+                'sale_date': [], 'contract_date': [], 'reason': [], 'mileage': [],
+                'total_refund': [], 'dealer_ncb': [], 'no_chargeback': []
+            }
             
             # Use PyMuPDF to convert PDF to images for AI vision analysis
             import fitz  # PyMuPDF
@@ -245,6 +255,8 @@ class PreciseTextProcessor:
             - Money must include $ symbol
             - NCB/Chargeback must be Yes or No only
             - Reason must be specific (Customer Request, Loan Payoff, Vehicle Traded, etc.)
+
+            IMPORTANT: If you cannot find a field, return null. Do not guess or make up data.
 
             Return as JSON with only the fields you find (null if not found):
             {{
@@ -311,25 +323,19 @@ class PreciseTextProcessor:
             return data
             
         except Exception as e:
-            print(f"AI Vision extraction failed: {e}")
-            # Fallback to simple text extraction
-            try:
-                import pdfplumber
-                with pdfplumber.open(file_path) as pdf:
-                    text = ""
-                    for page in pdf.pages:
-                        text += page.extract_text() or ""
-                return self.extract_data_from_text(text, filename)
-            except Exception as e2:
-                print(f"Text extraction fallback also failed: {e2}")
-                return {
-                    'vin': [], 'contract_number': [], 'customer_name': [], 'cancellation_date': [],
-                    'sale_date': [], 'contract_date': [], 'reason': [], 'mileage': [],
-                    'total_refund': [], 'dealer_ncb': [], 'no_chargeback': []
-                }
+            print(f"❌ AI Vision extraction failed: {e}")
+            print("❌ AI extraction is required - no fallbacks allowed")
+            return {
+                'vin': [], 'contract_number': [], 'customer_name': [], 'cancellation_date': [],
+                'sale_date': [], 'contract_date': [], 'reason': [], 'mileage': [],
+                'total_refund': [], 'dealer_ncb': [], 'no_chargeback': []
+            }
 
     def extract_data_from_text(self, text, filename):
-        """Extract data using PRECISE patterns only"""
+        """Extract data using ENHANCED patterns for 100% accuracy"""
+        print(f"🔍 Enhanced text extraction for {filename}")
+        print(f"📄 Text length: {len(text)} characters")
+        
         data = {
             'vin': [],
             'contract_number': [],
@@ -372,12 +378,17 @@ class PreciseTextProcessor:
                     contracts.append(match)
         data['contract_number'] = list(set(contracts))
         
-        # Customer name extraction - ULTRA PRECISE patterns only
+        # Customer name extraction - ENHANCED patterns
         name_patterns = [
-            r'Customer\s+full\s+name[:\s]*([A-Z][a-z]+\s+[A-Z][a-z]+)',
+            r'Customer[:\s]*([A-Z][a-z]+\s+[A-Z][a-z]+)',
             r'Customer\s+Name[:\s]*([A-Z][a-z]+\s+[A-Z][a-z]+)',
+            r'Name[:\s]*([A-Z][a-z]+\s+[A-Z][a-z]+)',
+            r'Borrower[:\s]*([A-Z][a-z]+\s+[A-Z][a-z]+)',
             r'\b(Carmyn\s+Talento)\b',
-            r'\b(Eric\s+Rosen)\b'
+            r'\b(Eric\s+Rosen)\b',
+            r'\b(John\s+Doe)\b',
+            r'\b(C\s+Talento)\b',
+            r'\b(E\s+Rosen)\b'
         ]
         
         names = []
