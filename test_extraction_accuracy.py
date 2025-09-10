@@ -99,10 +99,9 @@ def test_extraction_accuracy():
             return False
         
         # Get the first (and only) packet
-        packet_id = list(packets.keys())[0]
-        packet = packets[packet_id]
+        packet = packets[0]  # packets is now a list, not a dict
         
-        print(f"\n📊 Extracted Data for Packet {packet_id}:")
+        print(f"\n📊 Extracted Data for Packet:")
         print("-" * 30)
         print(f"Packet type: {type(packet)}")
         print(f"Packet content: {packet}")

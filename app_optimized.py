@@ -32,7 +32,7 @@ except ImportError:
 # Configure page
 st.set_page_config(
     page_title="QC Form Cancellations Checker",
-    layout="wide",
+    page_layout="wide",
     initial_sidebar_state="expanded"
 )
 
@@ -104,8 +104,8 @@ class CancellationProcessor:
             print(f"Error extracting text from {file_path}: {e}")
             return ""
     
-    def extract_fields_ultra_precise(self, text, filename, file_path):
-        """Extract key fields with 99%+ accuracy using cancellation packet-specific patterns."""
+    def extract_fields(self, text, filename, file_path):
+        """Extract key fields from text with optimized patterns."""
         if not text:
             return {}
         
@@ -114,7 +114,7 @@ class CancellationProcessor:
         
         fields = {}
         
-        # VIN patterns - exact 17 character alphanumeric (standard VIN format)
+        # VIN patterns (17 characters, alphanumeric)
         vin_patterns = [
             r'\b([A-HJ-NPR-Z0-9]{17})\b',
             r'VIN[:\s]*([A-HJ-NPR-Z0-9]{17})',
@@ -126,126 +126,92 @@ class CancellationProcessor:
             vins.extend(matches)
         fields['vins'] = list(set(vins))
         
-        # Contract patterns - based on actual cancellation packet formats
+        # Contract patterns - more comprehensive
         contract_patterns = [
-            # Standard contract number patterns from cancellation forms
-            r'Contract[:\s]*#?\s*:?\s*([A-Z0-9]{8,15})(?:\s|$|\n)',
-            r'Contract[:\s]*Number[:\s]*([A-Z0-9]{8,15})(?:\s|$|\n)',
-            r'PN[:\s]*([A-Z0-9]{8,15})(?:\s|$|\n)',
-            r'DL[:\s]*([A-Z0-9]{8,15})(?:\s|$|\n)',
-            r'#\s*([A-Z0-9]{8,15})(?:\s|$|\n)',
-            # Specific patterns for cancellation packets
-            r'Agreement[:\s]*#?\s*:?\s*([A-Z0-9]{8,15})(?:\s|$|\n)',
-            r'Policy[:\s]*#?\s*:?\s*([A-Z0-9]{8,15})(?:\s|$|\n)'
+            r'Contract[:\s]*#?\s*:?\s*([A-Z0-9]{6,20})',
+            r'Contract[:\s]*Number[:\s]*([A-Z0-9]{6,20})',
+            r'PN[:\s]*([A-Z0-9]{6,20})',
+            r'DL[:\s]*([A-Z0-9]{6,20})',
+            r'#\s*([A-Z0-9]{6,20})',
+            r'Contract[:\s]*ID[:\s]*([A-Z0-9]{6,20})',
+            r'Agreement[:\s]*#?\s*:?\s*([A-Z0-9]{6,20})'
         ]
         contracts = []
         for pattern in contract_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
-            for match in matches:
-                # Validate contract number format (8-15 alphanumeric)
-                if len(match) >= 8 and len(match) <= 15 and match.isalnum():
-                    contracts.append(match)
+            contracts.extend(matches)
         fields['contracts'] = list(set(contracts))
         
-        # Customer name patterns - based on cancellation form structure
+        # Customer name patterns - very specific
         customer_patterns = [
-            # Standard cancellation form patterns
-            r'Customer[:\s]*Name[:\s]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})(?:\s|$|\n)',
-            r'Name[:\s]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})(?:\s|$|\n)',
-            r'Buyer[:\s]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})(?:\s|$|\n)',
-            r'Purchaser[:\s]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})(?:\s|$|\n)',
-            # Additional patterns from cancellation packets
-            r'Client[:\s]*Name[:\s]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})(?:\s|$|\n)',
-            r'Policyholder[:\s]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,3})(?:\s|$|\n)'
+            r'Customer[:\s]*Name[:\s]*([A-Za-z\s]{2,30})',
+            r'Name[:\s]*([A-Za-z\s]{2,30})',
+            r'Buyer[:\s]*([A-Za-z\s]{2,30})',
+            r'Purchaser[:\s]*([A-Za-z\s]{2,30})'
         ]
         customer_names = []
         for pattern in customer_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
             for match in matches:
                 name = match.strip()
-                # Validate name format (2-4 words, proper case)
-                words = name.split()
-                if 2 <= len(words) <= 4 and all(word[0].isupper() and word[1:].islower() for word in words):
+                if len(name.split()) >= 2 and len(name) <= 30:
                     customer_names.append(name)
         fields['customer_names'] = list(set(customer_names))
         
-        # Sale dates - based on cancellation packet date formats
+        # Date patterns
+        date_patterns = [
+            r'(\d{1,2}/\d{1,2}/\d{2,4})',
+            r'(\d{4}-\d{1,2}-\d{1,2})',
+            r'(\d{1,2}-\d{1,2}-\d{2,4})'
+        ]
+        
+        # Sale dates
         sale_patterns = [
-            # Standard sale date patterns
-            r'Sale[:\s]*Date[:\s]*(\d{1,2}/\d{1,2}/\d{2,4})(?:\s|$|\n)',
-            r'Purchase[:\s]*Date[:\s]*(\d{1,2}/\d{1,2}/\d{2,4})(?:\s|$|\n)',
-            r'Contract[:\s]*Date[:\s]*(\d{1,2}/\d{1,2}/\d{2,4})(?:\s|$|\n)',
-            # Additional patterns from cancellation packets
-            r'Policy[:\s]*Date[:\s]*(\d{1,2}/\d{1,2}/\d{2,4})(?:\s|$|\n)',
-            r'Effective[:\s]*Date[:\s]*(\d{1,2}/\d{1,2}/\d{2,4})(?:\s|$|\n)',
-            r'Start[:\s]*Date[:\s]*(\d{1,2}/\d{1,2}/\d{2,4})(?:\s|$|\n)'
+            r'Sale[:\s]*Date[:\s]*(\d{1,2}/\d{1,2}/\d{2,4})',
+            r'Purchase[:\s]*Date[:\s]*(\d{1,2}/\d{1,2}/\d{2,4})',
+            r'Contract[:\s]*Date[:\s]*(\d{1,2}/\d{1,2}/\d{2,4})'
         ]
         sale_dates = []
         for pattern in sale_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
-            for match in matches:
-                # Validate date format
-                try:
-                    datetime.strptime(match, '%m/%d/%Y')
-                    sale_dates.append(match)
-                except:
-                    pass
+            sale_dates.extend(matches)
         fields['sale_dates'] = list(set(sale_dates))
         
-        # Cancellation dates - based on cancellation packet formats
+        # Cancellation dates
         cancel_patterns = [
-            # Standard cancellation date patterns
-            r'Cancel[:\s]*Date[:\s]*(\d{1,2}/\d{1,2}/\d{2,4})(?:\s|$|\n)',
-            r'Cancellation[:\s]*Date[:\s]*(\d{1,2}/\d{1,2}/\d{2,4})(?:\s|$|\n)',
-            r'Request[:\s]*Date[:\s]*(\d{1,2}/\d{1,2}/\d{2,4})(?:\s|$|\n)',
-            # Additional patterns from cancellation packets
-            r'Termination[:\s]*Date[:\s]*(\d{1,2}/\d{1,2}/\d{2,4})(?:\s|$|\n)',
-            r'End[:\s]*Date[:\s]*(\d{1,2}/\d{1,2}/\d{2,4})(?:\s|$|\n)',
-            r'Stop[:\s]*Date[:\s]*(\d{1,2}/\d{1,2}/\d{2,4})(?:\s|$|\n)'
+            r'Cancel[:\s]*Date[:\s]*(\d{1,2}/\d{1,2}/\d{2,4})',
+            r'Cancellation[:\s]*Date[:\s]*(\d{1,2}/\d{1,2}/\d{2,4})',
+            r'Request[:\s]*Date[:\s]*(\d{1,2}/\d{1,2}/\d{2,4})'
         ]
         cancel_dates = []
         for pattern in cancel_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
-            for match in matches:
-                # Validate date format
-                try:
-                    datetime.strptime(match, '%m/%d/%Y')
-                    cancel_dates.append(match)
-                except:
-                    pass
+            cancel_dates.extend(matches)
         fields['cancellation_dates'] = list(set(cancel_dates))
         
-        # Reasons - based on common cancellation reasons
+        # Reasons - more comprehensive patterns
         reason_patterns = [
-            # Standard cancellation reason patterns - stop at colon
-            r'Reason[:\s]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})(?:\s|$|\n)',
-            r'Cancellation[:\s]*Reason[:\s]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})(?:\s|$|\n)',
-            r'Customer[:\s]*Request[:\s]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})(?:\s|$|\n)',
-            # Common cancellation reasons
-            r'Why[:\s]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})(?:\s|$|\n)',
-            r'Cause[:\s]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})(?:\s|$|\n)',
-            r'Explanation[:\s]*([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,2})(?:\s|$|\n)'
+            r'Reason[:\s]*([A-Za-z\s]{3,50})',
+            r'Cancellation[:\s]*Reason[:\s]*([A-Za-z\s]{3,50})',
+            r'Customer[:\s]*Request[:\s]*([A-Za-z\s]{3,50})',
+            r'Why[:\s]*([A-Za-z\s]{3,50})',
+            r'Cause[:\s]*([A-Za-z\s]{3,50})',
+            r'Explanation[:\s]*([A-Za-z\s]{3,50})'
         ]
         reasons = []
         for pattern in reason_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
             for match in matches:
                 reason = match.strip()
-                # Validate reason format (1-3 words, proper case)
-                words = reason.split()
-                if 1 <= len(words) <= 3 and all(word[0].isupper() and word[1:].islower() for word in words):
+                if len(reason) >= 5 and len(reason) <= 50:
                     reasons.append(reason)
         fields['reasons'] = list(set(reasons))
         
-        # Mileage patterns - based on vehicle mileage formats
+        # Mileage patterns
         mileage_patterns = [
-            # Standard mileage patterns
-            r'Mileage[:\s]*([0-9,]{3,8})(?:\s|$|\n)',
-            r'Miles[:\s]*([0-9,]{3,8})(?:\s|$|\n)',
-            r'(\d{1,3}(?:,\d{3})*)\s*miles?(?:\s|$|\n)',
-            # Additional patterns from cancellation packets
-            r'Odometer[:\s]*([0-9,]{3,8})(?:\s|$|\n)',
-            r'Vehicle[:\s]*Mileage[:\s]*([0-9,]{3,8})(?:\s|$|\n)'
+            r'Mileage[:\s]*([0-9,]{1,8})',
+            r'Miles[:\s]*([0-9,]{1,8})',
+            r'(\d{1,3}(?:,\d{3})*)\s*miles?'
         ]
         mileages = []
         for pattern in mileage_patterns:
@@ -259,42 +225,21 @@ class CancellationProcessor:
                         mileages.append(mileage)
         fields['mileages'] = list(set(mileages))
         
-        # Financial data - based on cancellation packet financial sections
-        refund_patterns = [
-            r'Total[:\s]*Refund[:\s]*\$?([0-9,]+\.?\d*)(?:\s|$|\n)',
-            r'Refund[:\s]*Amount[:\s]*\$?([0-9,]+\.?\d*)(?:\s|$|\n)',
-            r'Refund[:\s]*Total[:\s]*\$?([0-9,]+\.?\d*)(?:\s|$|\n)',
-            r'Amount[:\s]*Refunded[:\s]*\$?([0-9,]+\.?\d*)(?:\s|$|\n)'
-        ]
-        for pattern in refund_patterns:
-            refund_matches = re.findall(pattern, text, re.IGNORECASE)
-            if refund_matches:
-                fields['total_refund'] = f"${refund_matches[0]}"
-                break
+        # Financial data
+        refund_pattern = r'Total[:\s]*Refund[:\s]*\$?([0-9,]+\.?\d*)'
+        refund_matches = re.findall(refund_pattern, text, re.IGNORECASE)
+        if refund_matches:
+            fields['total_refund'] = f"${refund_matches[0]}"
         
-        # Dealer NCB patterns
-        dealer_ncb_patterns = [
-            r'Dealer[:\s]*NCB[:\s]*([A-Za-z]+)(?:\s|$|\n)',
-            r'Dealer[:\s]*No[:\s]*Chargeback[:\s]*([A-Za-z]+)(?:\s|$|\n)',
-            r'NCB[:\s]*Dealer[:\s]*([A-Za-z]+)(?:\s|$|\n)'
-        ]
-        for pattern in dealer_ncb_patterns:
-            dealer_ncb_matches = re.findall(pattern, text, re.IGNORECASE)
-            if dealer_ncb_matches:
-                fields['dealer_ncb'] = dealer_ncb_matches[0]
-                break
+        dealer_ncb_pattern = r'Dealer[:\s]*NCB[:\s]*([A-Za-z]+)'
+        dealer_ncb_matches = re.findall(dealer_ncb_pattern, text, re.IGNORECASE)
+        if dealer_ncb_matches:
+            fields['dealer_ncb'] = dealer_ncb_matches[0]
         
-        # No Chargeback patterns
-        chargeback_patterns = [
-            r'No[:\s]*Chargeback[:\s]*([A-Za-z]+)(?:\s|$|\n)',
-            r'Chargeback[:\s]*No[:\s]*([A-Za-z]+)(?:\s|$|\n)',
-            r'No[:\s]*Charge[:\s]*Back[:\s]*([A-Za-z]+)(?:\s|$|\n)'
-        ]
-        for pattern in chargeback_patterns:
-            chargeback_matches = re.findall(pattern, text, re.IGNORECASE)
-            if chargeback_matches:
-                fields['no_chargeback'] = chargeback_matches[0]
-                break
+        chargeback_pattern = r'No[:\s]*Chargeback[:\s]*([A-Za-z]+)'
+        chargeback_matches = re.findall(chargeback_pattern, text, re.IGNORECASE)
+        if chargeback_matches:
+            fields['no_chargeback'] = chargeback_matches[0]
         
         return fields
     
@@ -323,8 +268,8 @@ class CancellationProcessor:
                             # Extract text
                             text = self.extract_text_from_file(file_path)
                             
-                            # Extract fields with ultra-precise method
-                            fields = self.extract_fields_ultra_precise(text, file, file_path)
+                            # Extract fields
+                            fields = self.extract_fields(text, file, file_path)
                             
                             # Get file data for download
                             file_data_bytes = self.get_file_download_data(file_path)
