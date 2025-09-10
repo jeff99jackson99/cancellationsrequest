@@ -641,22 +641,21 @@ class CancellationProcessor:
         
         fields['contracts'] = list(set(filtered_contracts))  # Remove duplicates
         
-        # Reason extraction - more comprehensive patterns
+        # Reason extraction - more restrictive patterns
         reason_patterns = [
             r'(?:vehicle\s+traded|trade\s*in|sold|repossession|total\s*loss|dealer\s*buyback|customer\s*request)',
-            r'(?:reason|cause)[:\s]+([^.\n]+)',
-            r'(?:cancellation|cancel)[:\s]+(?:reason|cause)[:\s]+([^.\n]+)',
-            r'(?:why|because)[:\s]+([^.\n]+)',
-            r'(?:cancellation\s+request|cancel\s+request)[:\s]*([^.\n]+)',
-            r'(?:customer\s+request|client\s+request)[:\s]*([^.\n]+)',
-            r'(?:loan\s+payoff|payoff)[:\s]*([^.\n]+)',
-            r'(?:repossession|repo)[:\s]*([^.\n]+)',
-            r'(?:total\s+loss|accident)[:\s]*([^.\n]+)',
-            r'(?:default|delinquent)[:\s]*([^.\n]+)',
-            r'(?:issued\s+in\s+error|error)[:\s]*([^.\n]+)',
-            r'(?:vehicle\s+sold|sold)[:\s]*([^.\n]+)',
-            r'(?:vehicle\s+stolen|stolen)[:\s]*([^.\n]+)',
-            r'(?:deal\s+unwound|unwound)[:\s]*([^.\n]+)',
+            r'(?:reason|cause)[:\s]+([A-Za-z\s]{3,30})',
+            r'(?:cancellation|cancel)[:\s]+(?:reason|cause)[:\s]+([A-Za-z\s]{3,30})',
+            r'(?:cancellation\s+request|cancel\s+request)[:\s]*([A-Za-z\s]{3,30})',
+            r'(?:customer\s+request|client\s+request)[:\s]*([A-Za-z\s]{3,30})',
+            r'(?:loan\s+payoff|payoff)[:\s]*([A-Za-z\s]{3,30})',
+            r'(?:repossession|repo)[:\s]*([A-Za-z\s]{3,30})',
+            r'(?:total\s+loss|accident)[:\s]*([A-Za-z\s]{3,30})',
+            r'(?:default|delinquent)[:\s]*([A-Za-z\s]{3,30})',
+            r'(?:issued\s+in\s+error|error)[:\s]*([A-Za-z\s]{3,30})',
+            r'(?:vehicle\s+sold|sold)[:\s]*([A-Za-z\s]{3,30})',
+            r'(?:vehicle\s+stolen|stolen)[:\s]*([A-Za-z\s]{3,30})',
+            r'(?:deal\s+unwound|unwound)[:\s]*([A-Za-z\s]{3,30})',
         ]
         
         reasons = []
@@ -664,9 +663,10 @@ class CancellationProcessor:
             matches = re.findall(pattern, text, re.IGNORECASE)
             for match in matches:
                 reason = match.strip()
-                if (len(reason) > 3 and 
-                    not any(char.isdigit() for char in reason[:10]) and
-                    reason.lower() not in ['reason', 'cause', 'why', 'because', 'cancellation', 'cancel']):
+                if (len(reason) >= 3 and len(reason) <= 50 and  # Reasonable length
+                    not any(char.isdigit() for char in reason) and  # No numbers
+                    reason.lower() not in ['reason', 'cause', 'why', 'because', 'cancellation', 'cancel', 'the', 'only', 'instance', 'which', 'customer', 'signature', 'required', 'when', 'being', 'requested', 'directly', 'all', 'other', 'scenarios', 'such', 'loan', 'payoff', 'repossession', 'total', 'loss', 'appropriate', 'supporting', 'documentation', 'from', 'lienholder', 'dealer', 'insurance', 'provider', 'must', 'provided', 'please', 'note', 'failure', 'upload', 'required', 'documentation', 'complete', 'form', 'full', 'will', 'result', 'delays', 'processing', 'may', 'potentially', 'invalidate', 'request', 'today', 'legal', 'attestation', 'statement', 'submitting', 'hereby', 'certify', 'information', 'true', 'correct', 'acknowledge', 'agree', 'electronic', 'shall', 'have', 'same', 'force', 'handwritten', 'ascent', 'administration', 'rely', 'upon', 'submission', 'official', 'understand', 'providing', 'false', 'incomplete', 'misleading', 'denial', 'delay', 'andor', 'liability'] and  # Common false positives
+                    len(reason.split()) <= 5):  # Not too many words
                     reasons.append(reason)
         
         fields['reasons'] = list(set(reasons))  # Remove duplicates
@@ -749,16 +749,13 @@ class CancellationProcessor:
         
         fields['refund_addresses'] = list(set(addresses))
         
-        # Mileage extraction - enhanced patterns
+        # Mileage extraction - more restrictive patterns
         mileage_patterns = [
             r'(?:mileage|odom(?:eter)?)\s*[:#]?\s*([0-9]{1,6}(?:,[0-9]{3})?)',
-            r'(?:mileage|odom(?:eter)?)\s*[:#]?\s*([0-9,]+)',
             r'(?:sale|effect)\s*odom[:\s]*([0-9,]+)',
             r'odom[:\s]*([0-9,]+)',
             r'mileage[:\s]*([0-9,]+)',
             r'(\d{1,6}(?:,\d{3})*)\s*(?:miles?|mi\.?)',
-            r'(?:miles?|mi\.?)\s*[:#]?\s*([0-9,]+)',
-            r'(\d{4,6})',  # Catch 4-6 digit numbers that could be mileage
         ]
         
         mileages = []
@@ -772,34 +769,34 @@ class CancellationProcessor:
             # Remove commas and convert to int
             try:
                 mileage_num = int(mileage.replace(',', ''))
-                # Reasonable mileage range: 0 to 999,999
-                if 0 <= mileage_num <= 999999:
+                # More restrictive mileage range: 1,000 to 500,000 (typical car mileage)
+                if 1000 <= mileage_num <= 500000:
                     filtered_mileages.append(mileage)
             except ValueError:
                 continue
         
         fields['mileages'] = list(set(filtered_mileages))
         
-        # Customer name extraction - enhanced patterns
+        # Customer name extraction - more restrictive patterns
         customer_patterns = [
-            r'(?:customer|client|name)[:\s]+([A-Za-z\s]+?)(?:\n|$)',
-            r'Name[:\s]+([A-Za-z\s]+?)(?:\n|$)',
-            r'Customer[:\s]+([A-Za-z\s]+?)(?:\n|$)',
-            r'(?:first\s+name|last\s+name)[:\s]+([A-Za-z\s]+?)(?:\n|$)',
-            r'(?:buyer|purchaser)[:\s]+([A-Za-z\s]+?)(?:\n|$)',
-            r'(?:signature|signed\s+by)[:\s]+([A-Za-z\s]+?)(?:\n|$)',
-            r'([A-Z][a-z]+\s+[A-Z][a-z]+)',  # First Last format
-            r'([A-Z][a-z]+\s+[A-Z]\.\s*[A-Z][a-z]+)',  # First M. Last format
+            r'(?:customer|client|name)[:\s]+([A-Z][a-z]+\s+[A-Z][a-z]+)',  # Customer: First Last
+            r'Name[:\s]+([A-Z][a-z]+\s+[A-Z][a-z]+)',  # Name: First Last
+            r'Customer[:\s]+([A-Z][a-z]+\s+[A-Z][a-z]+)',  # Customer: First Last
+            r'(?:first\s+name|last\s+name)[:\s]+([A-Z][a-z]+)',  # First Name: John
+            r'(?:buyer|purchaser)[:\s]+([A-Z][a-z]+\s+[A-Z][a-z]+)',  # Buyer: First Last
+            r'(?:signature|signed\s+by)[:\s]+([A-Z][a-z]+\s+[A-Z][a-z]+)',  # Signature: First Last
         ]
         
         for pattern in customer_patterns:
             matches = re.findall(pattern, text, re.IGNORECASE)
             for match in matches:
                 name = match.strip()
-                # Enhanced filtering
-                if (len(name) > 2 and 
-                    not any(char.isdigit() for char in name) and
-                    name.lower() not in ['signature', 'customer', 'name', 'date', 'time', 'contract', 'vin', 'mileage', 'sale', 'effect']):
+                # More restrictive filtering
+                if (len(name) >= 3 and len(name) <= 50 and  # Reasonable length
+                    not any(char.isdigit() for char in name) and  # No numbers
+                    not any(char in name for char in '.,;:()[]{}') and  # No special chars
+                    name.lower() not in ['signature', 'customer', 'name', 'date', 'time', 'contract', 'vin', 'mileage', 'sale', 'effect', 'directly', 'by', 'the', 'only', 'instance', 'which', 'required', 'when', 'cancellation', 'being', 'requested', 'all', 'other', 'scenarios', 'such', 'loan', 'payoff', 'repossession', 'total', 'loss', 'appropriate', 'supporting', 'documentation', 'from', 'lienholder', 'dealer', 'insurance', 'provider', 'must', 'provided', 'please', 'note', 'failure', 'upload', 'required', 'documentation', 'complete', 'form', 'full', 'will', 'result', 'delays', 'processing', 'may', 'potentially', 'invalidate', 'request', 'today', 'legal', 'attestation', 'statement', 'submitting', 'hereby', 'certify', 'information', 'true', 'correct', 'acknowledge', 'agree', 'electronic', 'shall', 'have', 'same', 'force', 'handwritten', 'ascent', 'administration', 'rely', 'upon', 'submission', 'official', 'understand', 'providing', 'false', 'incomplete', 'misleading', 'denial', 'delay', 'andor', 'liability'] and  # Common false positives
+                    len(name.split()) >= 2):  # At least two words
                     fields['customer_names'].append(name)
         
         # Flag detection with comprehensive patterns
@@ -1188,17 +1185,12 @@ class CancellationProcessor:
                     file_ext = os.path.splitext(filename)[1].lower()
                     
                     with col:
-                        # Create thumbnail
-                        try:
-                            thumbnail = self.create_thumbnail(file_data, temp_dir)
-                            if thumbnail:
-                                st.image(thumbnail, caption=filename, use_container_width=True)
-                            else:
-                                st.write("❌ Thumbnail creation failed")
-                        except Exception as e:
-                            st.write(f"❌ Error creating thumbnail: {e}")
-                            # Fallback: show file info without thumbnail
-                            st.write(f"📄 {filename}")
+                        # Use pre-created thumbnail
+                        thumbnail = file_data.get('thumbnail')
+                        if thumbnail:
+                            st.image(thumbnail, caption=filename, use_container_width=True)
+                        else:
+                            st.write("📄 No thumbnail available")
                         
                         # File info
                         st.write(f"**{filename}**")
@@ -1839,6 +1831,16 @@ class CancellationProcessor:
                         text = self.extract_text_from_file(file_path)
                         if text.strip():  # Only process files with content
                             fields = self.extract_fields(text, file, file_path)
+                            
+                            # Create thumbnail during processing when temp_dir is available
+                            try:
+                                file_data = {'filename': file}
+                                thumbnail = self.create_thumbnail(file_data, temp_dir)
+                                fields['thumbnail'] = thumbnail
+                            except Exception as e:
+                                print(f"Failed to create thumbnail for {file}: {e}")
+                                fields['thumbnail'] = None
+                            
                             self.files_data.append(fields)
             
             # Group files into packets
@@ -2081,14 +2083,11 @@ def main():
                                             break
                                     
                                     if file_data:
-                                        try:
-                                            # Create thumbnail
-                                            thumbnail = processor.create_thumbnail(file_data, temp_dir)
-                                            if thumbnail:
-                                                st.image(thumbnail, caption=filename.strip(), width=120)
-                                            else:
-                                                st.write(f"📄 {filename.strip()}")
-                                        except Exception as e:
+                                        # Use pre-created thumbnail
+                                        thumbnail = file_data.get('thumbnail')
+                                        if thumbnail:
+                                            st.image(thumbnail, caption=filename.strip(), width=120)
+                                        else:
                                             st.write(f"📄 {filename.strip()}")
                                     else:
                                         st.write(f"📄 {filename.strip()}")
@@ -2181,14 +2180,11 @@ def main():
                                                         break
                                                 
                                                 if file_data:
-                                                    try:
-                                                        # Create thumbnail
-                                                        thumbnail = processor.create_thumbnail(file_data, temp_dir)
-                                                        if thumbnail:
-                                                            st.image(thumbnail, caption=filename, width=150)
-                                                        else:
-                                                            st.write(f"📄 {filename}")
-                                                    except Exception as e:
+                                                    # Use pre-created thumbnail
+                                                    thumbnail = file_data.get('thumbnail')
+                                                    if thumbnail:
+                                                        st.image(thumbnail, caption=filename, width=150)
+                                                    else:
                                                         st.write(f"📄 {filename}")
                                                 else:
                                                     st.write(f"📄 {filename}")
