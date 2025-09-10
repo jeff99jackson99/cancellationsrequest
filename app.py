@@ -6,10 +6,13 @@ import os
 import re
 from pathlib import Path
 from datetime import datetime, timedelta
+import openai
 
 class PreciseTextProcessor:
     def __init__(self):
         self.files_data = []
+        # Set up OpenAI API
+        openai.api_key = os.getenv("OPENAI_API_KEY")
         
     def extract_best_pdf_text(self, file_path):
         """Try multiple PDF extraction methods and return the best result"""
@@ -157,6 +160,135 @@ class PreciseTextProcessor:
         
         return text.strip()
     
+    def extract_data_with_ai(self, text, filename):
+        """Use ChatGPT with comprehensive instructions for cancellation document QC analysis"""
+        try:
+            if not openai.api_key:
+                print("OpenAI API key not found, using regex extraction")
+                return self.extract_data_from_text(text, filename)
+                
+            comprehensive_prompt = f"""
+            You are an expert Quality Control analyst for a Cancellation Document Quality Control App. Your job is to extract specific data from cancellation documents to perform quality control checks.
+
+            CONTEXT - WHAT THIS APP DOES:
+            This Streamlit application automates quality control of cancellation document packets. Users upload ZIP files containing various documents related to contract cancellations (cancellation forms, lender letters, screenshots). The app parses and analyzes these documents against a fixed quality control checklist to ensure all information is consistent and meets requirements.
+
+            QUALITY CONTROL CHECKLIST ITEMS:
+            1. VIN Match: Verify Vehicle Identification Number is consistent across all documents
+            2. Contract ID Match: Ensure contract/policy number is the same in every document
+            3. Reason Consistency: Check cancellation reason is identical in all documents
+            4. Cancellation Date Consistency: Confirm cancellation effective date is the same throughout
+            5. >90 Day Rule Compliance: Evaluate if cancellation falls within allowable period
+            6. NCB Fee Presence: Check for required fees (NCB fee, No Chargeback Fee)
+            7. Signature Presence: Ensure all necessary signatures are present
+            8. Contract Tags: Identify special tags (Autohouse, Diversicare programs)
+            9. PCMI Screenshot Detection: Recognize PCMI system screenshots
+
+            DOCUMENT BEING ANALYZED:
+            Filename: {filename}
+            Text Content: {text[:4000]}
+
+            EXTRACTION TASK:
+            Extract the following fields with HIGH PRECISION for quality control analysis:
+
+            REQUIRED FIELDS:
+            - vin: Vehicle Identification Number (exactly 17 alphanumeric characters)
+            - contract_number: Contract/Policy number (PN, PT, GAP, DL + numbers)
+            - customer_name: Customer's full name (First Last format)
+            - cancellation_date: Cancellation effective date (MM/DD/YYYY format)
+            - sale_date: Contract sale date (MM/DD/YYYY format) 
+            - contract_date: Contract effective date (MM/DD/YYYY format)
+            - reason: Cancellation reason (Customer Request, Loan Payoff, Vehicle Traded, Total Loss, etc.)
+            - mileage: Vehicle mileage at cancellation (4-6 digit number)
+            - total_refund: Total refund amount (with $ symbol)
+            - dealer_ncb: Dealer NCB status (Yes/No)
+            - no_chargeback: No chargeback status (Yes/No)
+
+            EXTRACTION RULES:
+            1. VIN: Must be exactly 17 alphanumeric characters (A-H, J-N, P-R, T-Z, 0-9)
+            2. Contract Number: Must start with PN, PT, GAP, or DL followed by numbers
+            3. Customer Name: Must be First Last format (2 words, proper case)
+            4. Dates: Convert all date formats to MM/DD/YYYY
+            5. Mileage: Must be 4-6 digits only, remove commas
+            6. Money: Include $ symbol, format as $X,XXX.XX
+            7. NCB/Chargeback: Only Yes/No values
+            8. Reason: Standard cancellation reasons only
+
+            VALIDATION:
+            - VIN: Exactly 17 characters, alphanumeric only
+            - Contract: Starts with PN/PT/GAP/DL + numbers
+            - Customer: Exactly 2 words, proper case
+            - Mileage: 4-6 digits only
+            - NCB/Chargeback: Yes or No only
+
+            Return as JSON with these exact fields (null if not found):
+            {{
+                "vin": "string or null",
+                "contract_number": "string or null",
+                "customer_name": "string or null", 
+                "cancellation_date": "string or null",
+                "sale_date": "string or null",
+                "contract_date": "string or null",
+                "reason": "string or null",
+                "mileage": "string or null",
+                "total_refund": "string or null",
+                "dealer_ncb": "string or null",
+                "no_chargeback": "string or null"
+            }}
+            """
+            
+            client = openai.OpenAI(api_key=openai.api_key)
+            
+            response = client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[{"role": "user", "content": comprehensive_prompt}],
+                max_tokens=600,
+                temperature=0
+            )
+            
+            result = response.choices[0].message.content.strip()
+            
+            # Parse JSON response
+            import json
+            ai_data = json.loads(result)
+            
+            # Convert to our format with strict validation
+            data = {
+                'vin': [ai_data.get('vin')] if ai_data.get('vin') and len(ai_data.get('vin')) == 17 and ai_data.get('vin').isalnum() else [],
+                'contract_number': [ai_data.get('contract_number')] if ai_data.get('contract_number') and ai_data.get('contract_number').startswith(('PN', 'PT', 'GAP', 'DL')) else [],
+                'customer_name': [ai_data.get('customer_name')] if ai_data.get('customer_name') and len(ai_data.get('customer_name').split()) == 2 else [],
+                'cancellation_date': [ai_data.get('cancellation_date')] if ai_data.get('cancellation_date') else [],
+                'sale_date': [ai_data.get('sale_date')] if ai_data.get('sale_date') else [],
+                'contract_date': [ai_data.get('contract_date')] if ai_data.get('contract_date') else [],
+                'reason': [ai_data.get('reason')] if ai_data.get('reason') else [],
+                'mileage': [ai_data.get('mileage')] if ai_data.get('mileage') and ai_data.get('mileage').isdigit() and 4 <= len(ai_data.get('mileage')) <= 6 else [],
+                'total_refund': [ai_data.get('total_refund')] if ai_data.get('total_refund') else [],
+                'dealer_ncb': [ai_data.get('dealer_ncb')] if ai_data.get('dealer_ncb') in ['Yes', 'No'] else [],
+                'no_chargeback': [ai_data.get('no_chargeback')] if ai_data.get('no_chargeback') in ['Yes', 'No'] else []
+            }
+            
+            # Remove None values and validate
+            for key in data:
+                data[key] = [v for v in data[key] if v is not None and v != 'null' and v != '']
+            
+            print(f"🤖 AI QC Analysis for {filename}:")
+            print(f"   VIN: {data['vin']}")
+            print(f"   Contract: {data['contract_number']}")
+            print(f"   Customer: {data['customer_name']}")
+            print(f"   Cancellation Date: {data['cancellation_date']}")
+            print(f"   Sale Date: {data['sale_date']}")
+            print(f"   Reason: {data['reason']}")
+            print(f"   Mileage: {data['mileage']}")
+            print(f"   Refund: {data['total_refund']}")
+            print(f"   NCB: {data['dealer_ncb']}")
+            print(f"   No Chargeback: {data['no_chargeback']}")
+            
+            return data
+            
+        except Exception as e:
+            print(f"AI extraction failed: {e}")
+            return self.extract_data_from_text(text, filename)
+
     def extract_data_from_text(self, text, filename):
         """Extract data using PRECISE patterns only"""
         data = {
@@ -403,8 +535,8 @@ class PreciseTextProcessor:
                         text = self.convert_file_to_text(file_path)
                         
                         if text:
-                            # Extract data from text
-                            data = self.extract_data_from_text(text, filename)
+                            # Extract data from text using AI first, fallback to regex
+                            data = self.extract_data_with_ai(text, filename)
                             
                             # Debug output
                             print(f"=== {filename} ===")
