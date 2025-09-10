@@ -1390,8 +1390,15 @@ class CancellationProcessor:
             result['PCMI Screenshot (Of NCB fee buckets)'] = 'Not found'
             result['Total NCB Amount'] = ''
         
-        # Mileage
-        result['Mileage values found'] = '; '.join(all_mileages[:3]) if all_mileages else ''
+        # Mileage - show all detected mileages
+        if all_mileages:
+            # Remove duplicates while preserving order
+            unique_mileages = list(dict.fromkeys(all_mileages))
+            result['Mileage values found'] = ', '.join(unique_mileages)
+            result['Mileage Match Status'] = 'PASS' if len(unique_mileages) == 1 else 'FAIL' if len(unique_mileages) > 1 else 'INFO'
+        else:
+            result['Mileage values found'] = ''
+            result['Mileage Match Status'] = 'INFO'
         
         # Add source tracking data
         result['_source_data'] = source_data
@@ -1779,7 +1786,13 @@ def main():
                             
                             # Mileage
                             if result.get('Mileage values found'):
-                                st.markdown(f"🟢 Mileage: {result.get('Mileage values found')}")
+                                mileage_status = result.get('Mileage Match Status', 'INFO')
+                                mileage_color = "🟢" if mileage_status == "PASS" else "🔴" if mileage_status == "FAIL" else "🟡"
+                                st.markdown(f"{mileage_color} Mileage: {result.get('Mileage values found')}")
+                                if mileage_status == "FAIL":
+                                    st.markdown(f"   └─ Multiple different mileages found - needs review")
+                                elif mileage_status == "PASS":
+                                    st.markdown(f"   └─ All mileages match")
                         
                         # Show screenshot details if this packet has bucket screenshots
                         packet_files = result.get('Files', '').split(', ')
@@ -1877,7 +1890,13 @@ def main():
                             st.write(f"• PCMI Screenshot: {result.get('PCMI Screenshot (Of NCB fee buckets)', 'N/A')}")
                             
                             if result.get('Mileage values found'):
-                                st.write(f"• Mileage: {result.get('Mileage values found', 'N/A')}")
+                                mileage_status = result.get('Mileage Match Status', 'INFO')
+                                mileage_color = "🟢" if mileage_status == "PASS" else "🔴" if mileage_status == "FAIL" else "🟡"
+                                st.write(f"• Mileage: {mileage_color} {result.get('Mileage values found', 'N/A')}")
+                                if mileage_status == "FAIL":
+                                    st.write(f"  └─ Multiple different mileages found - needs review")
+                                elif mileage_status == "PASS":
+                                    st.write(f"  └─ All mileages match")
                     
                     # Add file thumbnail viewing section
                     processor.display_file_thumbnails(processor.files_data, temp_dir)
