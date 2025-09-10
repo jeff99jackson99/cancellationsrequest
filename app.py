@@ -6,7 +6,14 @@ import os
 import re
 from pathlib import Path
 from datetime import datetime, timedelta
-import openai
+
+# Optional OpenAI import
+try:
+    import openai
+    OPENAI_AVAILABLE = True
+except ImportError:
+    OPENAI_AVAILABLE = False
+    print("OpenAI not available, using regex extraction only")
 
 class PreciseTextProcessor:
     def __init__(self):
@@ -163,6 +170,10 @@ class PreciseTextProcessor:
     def extract_data_with_ai(self, text, filename):
         """Use ChatGPT with comprehensive instructions for cancellation document QC analysis"""
         try:
+            if not OPENAI_AVAILABLE:
+                print("OpenAI not available, using regex extraction")
+                return self.extract_data_from_text(text, filename)
+                
             if not openai.api_key:
                 print("OpenAI API key not found, using regex extraction")
                 return self.extract_data_from_text(text, filename)
