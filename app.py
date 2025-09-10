@@ -275,6 +275,7 @@ class PreciseTextProcessor:
         # Mileage extraction - ONLY with specific labels and realistic values
         mileage_patterns = [
             r'Mileage[:\s]*(\d{4,6})',
+            r'Mileage[:\s]*at[:\s]*cancellation[:\s]*date[,\s]*(\d{1,3},\d{3})',
             r'Mileage[:\s]*at[:\s]*cancellation[:\s]*date[,\s]*(\d{4,6})',
             r'Odometer[:\s]*(\d{4,6})',
             r'(\d{4,6})\s*miles?'
