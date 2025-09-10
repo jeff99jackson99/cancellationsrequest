@@ -22,10 +22,14 @@ class PreciseTextProcessor:
         if OPENAI_AVAILABLE:
             try:
                 # Try Streamlit secrets first
-                openai.api_key = st.secrets["OPENAI_API_KEY"]
-            except:
+                openai.api_key = st.secrets.get("OPENAI_API_KEY")
+                if not openai.api_key:
+                    # Fallback to environment variable
+                    openai.api_key = os.getenv("OPENAI_API_KEY")
+            except Exception as e:
                 # Fallback to environment variable
                 openai.api_key = os.getenv("OPENAI_API_KEY")
+                print(f"Could not get API key from secrets: {e}")
         
     def extract_best_pdf_text(self, file_path):
         """Try multiple PDF extraction methods and return the best result"""
@@ -839,24 +843,28 @@ class PreciseTextProcessor:
         return None
 
 def main():
-    st.title("📋 QC Form Cancellations Checker - AI Vision")
-    st.write("Upload a ZIP file containing cancellation packet files to perform quality control checks.")
-    st.write("🤖 **AI Vision**: Uses GPT-4o vision model for 100% accurate data extraction.")
-    
-    # Debug information
-    st.sidebar.subheader("🔧 Debug Info")
-    st.sidebar.write(f"OpenAI Available: {OPENAI_AVAILABLE}")
-    if OPENAI_AVAILABLE:
-        try:
-            # Try to get API key from secrets
-            api_key = st.secrets.get("OPENAI_API_KEY", "Not found in secrets")
-            if api_key == "Not found in secrets":
-                api_key = os.getenv("OPENAI_API_KEY", "Not found in environment")
-            st.sidebar.write(f"API Key: {'✅ Found' if api_key and api_key != 'Not found in secrets' and api_key != 'Not found in environment' else '❌ Not found'}")
-        except:
-            st.sidebar.write("API Key: ❌ Error checking")
-    else:
-        st.sidebar.write("OpenAI: ❌ Not available")
+    try:
+        st.title("📋 QC Form Cancellations Checker - AI Vision")
+        st.write("Upload a ZIP file containing cancellation packet files to perform quality control checks.")
+        st.write("🤖 **AI Vision**: Uses GPT-4o vision model for 100% accurate data extraction.")
+        
+        # Debug information
+        st.sidebar.subheader("🔧 Debug Info")
+        st.sidebar.write(f"OpenAI Available: {OPENAI_AVAILABLE}")
+        if OPENAI_AVAILABLE:
+            try:
+                # Try to get API key from secrets
+                api_key = st.secrets.get("OPENAI_API_KEY", "Not found in secrets")
+                if api_key == "Not found in secrets":
+                    api_key = os.getenv("OPENAI_API_KEY", "Not found in environment")
+                st.sidebar.write(f"API Key: {'✅ Found' if api_key and api_key != 'Not found in secrets' and api_key != 'Not found in environment' else '❌ Not found'}")
+            except Exception as e:
+                st.sidebar.write(f"API Key: ❌ Error checking: {e}")
+        else:
+            st.sidebar.write("OpenAI: ❌ Not available")
+    except Exception as e:
+        st.error(f"❌ Error initializing app: {str(e)}")
+        return
     
     # File upload
     uploaded_file = st.file_uploader(
