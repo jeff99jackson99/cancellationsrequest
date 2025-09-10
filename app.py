@@ -292,23 +292,10 @@ class CancellationProcessor:
         return fields
     
     def group_files_into_packets(self):
-        """Group files into packets based on Contract ID or VIN"""
-        for file_data in self.files_data:
-            packet_key = None
-            
-            # Try Contract ID first
-            if file_data['contracts']:
-                packet_key = f"CONTRACT_{file_data['contracts'][0]}"
-            # Fall back to VIN
-            elif file_data['vins']:
-                packet_key = f"VIN_{file_data['vins'][0]}"
-            else:
-                packet_key = "UNCLASSIFIED"
-            
-            if packet_key not in self.packets:
-                self.packets[packet_key] = []
-            
-            self.packets[packet_key].append(file_data)
+        """Group all files into a single packet for cross-reference checking"""
+        # Put all files into one packet for comprehensive checking
+        file_count = len(self.files_data)
+        self.packets = {f"ALL_FILES_{file_count}": self.files_data}
     
     def normalize_reason(self, reason):
         """Normalize reason to canonical form"""
@@ -377,7 +364,18 @@ class CancellationProcessor:
             'Files': ', '.join([f['filename'] for f in files])
         }
         
-        # Collect all values from all files in packet
+        # Create detailed source tracking
+        source_data = {
+            'vins': [],
+            'contracts': [],
+            'reasons': [],
+            'cancellation_dates': [],
+            'sale_dates': [],
+            'refund_addresses': [],
+            'mileages': []
+        }
+        
+        # Collect all values from all files in packet with source tracking
         all_vins = []
         all_contracts = []
         all_reasons = []
@@ -401,13 +399,36 @@ class CancellationProcessor:
         total_ncb_amounts = []
         
         for file_data in files:
-            all_vins.extend(file_data['vins'])
-            all_contracts.extend(file_data['contracts'])
-            all_reasons.extend(file_data['reasons'])
-            all_cancellation_dates.extend(file_data['cancellation_dates'])
-            all_sale_dates.extend(file_data['sale_dates'])
-            all_refund_addresses.extend(file_data['refund_addresses'])
-            all_mileages.extend(file_data['mileages'])
+            filename = file_data['filename']
+            
+            # Track sources for each data type
+            for vin in file_data['vins']:
+                all_vins.append(vin)
+                source_data['vins'].append(f"{vin} (from {filename})")
+            
+            for contract in file_data['contracts']:
+                all_contracts.append(contract)
+                source_data['contracts'].append(f"{contract} (from {filename})")
+            
+            for reason in file_data['reasons']:
+                all_reasons.append(reason)
+                source_data['reasons'].append(f"{reason} (from {filename})")
+            
+            for date in file_data['cancellation_dates']:
+                all_cancellation_dates.append(date)
+                source_data['cancellation_dates'].append(f"{date} (from {filename})")
+            
+            for date in file_data['sale_dates']:
+                all_sale_dates.append(date)
+                source_data['sale_dates'].append(f"{date} (from {filename})")
+            
+            for address in file_data['refund_addresses']:
+                all_refund_addresses.append(address)
+                source_data['refund_addresses'].append(f"{address} (from {filename})")
+            
+            for mileage in file_data['mileages']:
+                all_mileages.append(mileage)
+                source_data['mileages'].append(f"{mileage} (from {filename})")
             
             has_agent_ncb = has_agent_ncb or file_data['has_agent_ncb']
             has_dealer_ncb = has_dealer_ncb or file_data['has_dealer_ncb']
@@ -512,6 +533,9 @@ class CancellationProcessor:
         
         # Mileage
         result['Mileage values found'] = '; '.join(all_mileages[:3]) if all_mileages else ''
+        
+        # Add source tracking data
+        result['_source_data'] = source_data
         
         return result
     
@@ -658,6 +682,50 @@ def main():
                     for i, result in enumerate(results):
                         st.markdown(f"### Packet {i+1}: {result['Packet Key']}")
                         st.markdown(f"**Files:** {result['Files']}")
+                        
+                        # Show source data if available
+                        if '_source_data' in result:
+                            with st.expander("📋 View Data Sources"):
+                                source_data = result['_source_data']
+                                
+                                col1, col2 = st.columns(2)
+                                
+                                with col1:
+                                    if source_data['vins']:
+                                        st.write("**VINs Found:**")
+                                        for vin_source in source_data['vins']:
+                                            st.write(f"• {vin_source}")
+                                    
+                                    if source_data['contracts']:
+                                        st.write("**Contracts Found:**")
+                                        for contract_source in source_data['contracts']:
+                                            st.write(f"• {contract_source}")
+                                    
+                                    if source_data['reasons']:
+                                        st.write("**Reasons Found:**")
+                                        for reason_source in source_data['reasons']:
+                                            st.write(f"• {reason_source}")
+                                
+                                with col2:
+                                    if source_data['cancellation_dates']:
+                                        st.write("**Cancellation Dates Found:**")
+                                        for date_source in source_data['cancellation_dates']:
+                                            st.write(f"• {date_source}")
+                                    
+                                    if source_data['sale_dates']:
+                                        st.write("**Sale Dates Found:**")
+                                        for date_source in source_data['sale_dates']:
+                                            st.write(f"• {date_source}")
+                                    
+                                    if source_data['refund_addresses']:
+                                        st.write("**Refund Addresses Found:**")
+                                        for addr_source in source_data['refund_addresses']:
+                                            st.write(f"• {addr_source}")
+                                    
+                                    if source_data['mileages']:
+                                        st.write("**Mileage Found:**")
+                                        for mileage_source in source_data['mileages']:
+                                            st.write(f"• {mileage_source}")
                         
                         # Create visual checklist with color coding
                         checklist_cols = st.columns(3)
