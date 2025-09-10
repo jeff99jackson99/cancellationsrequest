@@ -12,8 +12,14 @@ from docx import Document
 from PIL import Image
 import pytesseract
 import io
-import cv2
-import numpy as np
+try:
+    import cv2
+    import numpy as np
+    OPENCV_AVAILABLE = True
+except ImportError:
+    OPENCV_AVAILABLE = False
+    # Fallback for environments where OpenCV is not available
+    import numpy as np
 
 # Page configuration
 st.set_page_config(
@@ -25,6 +31,10 @@ st.set_page_config(
 # Title and description
 st.title("📋 QC Form Cancellations Checker")
 st.markdown("Upload a ZIP file containing cancellation packet files to perform quality control checks. The app can process screenshots of bucket files to extract NCB fee data.")
+
+# Check for OpenCV availability
+if not OPENCV_AVAILABLE:
+    st.warning("⚠️ OpenCV is not available. Screenshot processing will use basic OCR without image preprocessing.")
 
 # Sidebar with QC Checklist
 st.sidebar.header("QC Checklist")
@@ -71,6 +81,10 @@ class ScreenshotProcessor:
     
     def preprocess_image(self, image):
         """Preprocess image for better OCR"""
+        if not OPENCV_AVAILABLE:
+            # Fallback: return original image if OpenCV is not available
+            return image
+            
         # Convert PIL to OpenCV format
         img_array = np.array(image)
         
